@@ -16,6 +16,7 @@ Usage:
   pxeboot ssh [IP]          SSH to the most recent installer client
   pxeboot rdp [IP]          Show Fedora RDP endpoint and credentials
   pxeboot logs              Follow HTTP and dnsmasq logs
+  pxeboot watch             Show concise live PXE/installer progress
   pxeboot doctor            Run configuration checks
   pxeboot topology          Show the resolved topology without starting it
   pxeboot profile ...       List, inspect, detect, or select topology profiles
@@ -487,6 +488,10 @@ case "${command_name}" in
     [[ -e "${ROOT_DIR}/.run/http.log" ]] || : > "${ROOT_DIR}/.run/http.log"
     [[ -e "${ROOT_DIR}/.run/dnsmasq.log" ]] || : > "${ROOT_DIR}/.run/dnsmasq.log"
     exec tail -F "${ROOT_DIR}/.run/http.log" "${ROOT_DIR}/.run/dnsmasq.log"
+    ;;
+  watch)
+    [[ "$#" -eq 0 ]] || die "usage: pxeboot watch"
+    exec "${ROOT_DIR}/bin/watch"
     ;;
   doctor)
     [[ "$#" -eq 0 ]] || die "usage: pxeboot doctor"

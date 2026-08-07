@@ -1,6 +1,21 @@
 #!ipxe
 set base @@PXE_BOOT_URL@@
 set alpine_netboot @@ALPINE_NETBOOT_URL@@
-kernel ${alpine_netboot}/vmlinuz-lts modules=loop,squashfs ip=dhcp alpine_repo=@@ALPINE_REPO_URL@@ modloop=${alpine_netboot}/modloop-lts apkovl=${base}/assets/alpine/headless.apkovl.tar.gz
-initrd ${alpine_netboot}/initramfs-lts
-boot
+imgfetch --name pxestatus ${base}/event?stage=alpine-kernel-start || echo Status callback failed
+imgfree pxestatus || echo Status cleanup skipped
+kernel ${alpine_netboot}/vmlinuz-lts modules=loop,squashfs ip=dhcp alpine_repo=@@ALPINE_REPO_URL@@ modloop=${alpine_netboot}/modloop-lts apkovl=${base}/assets/alpine/headless.apkovl.tar.gz || goto failed
+imgfetch --name pxestatus ${base}/event?stage=alpine-kernel-loaded || echo Status callback failed
+imgfree pxestatus || echo Status cleanup skipped
+imgfetch --name pxestatus ${base}/event?stage=alpine-initrd-start || echo Status callback failed
+imgfree pxestatus || echo Status cleanup skipped
+initrd ${alpine_netboot}/initramfs-lts || goto failed
+imgfetch --name pxestatus ${base}/event?stage=alpine-initrd-loaded || echo Status callback failed
+imgfree pxestatus || echo Status cleanup skipped
+imgfetch --name pxestatus ${base}/event?stage=alpine-boot || echo Status callback failed
+imgfree pxestatus || echo Status cleanup skipped
+boot || goto failed
+
+:failed
+imgfetch --name pxestatus ${base}/event?stage=alpine-failed || echo Alpine boot failed
+imgfree pxestatus || echo Status cleanup skipped
+exit 1

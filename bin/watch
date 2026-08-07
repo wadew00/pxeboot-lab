@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+use_session_env || true
+load_env
+require_command tail
+require_command nc
+
+run_dir="${ROOT_DIR}/.run"
+http_log="${run_dir}/http.log"
+dnsmasq_log="${run_dir}/dnsmasq.log"
+mkdir -p "${run_dir}"
+[[ -e "${http_log}" ]] || : > "${http_log}"
+[[ -e "${dnsmasq_log}" ]] || : > "${dnsmasq_log}"
+
+client_ip() {
+  if [[ -n "${PXE_CLIENT_IP:-}" ]]; then
+    printf '%s\n' "${PXE_CLIENT_IP}"
+  elif [[ "${PXE_MODE}" != dedicated ]] && [[ -n "${PXE_CLIENT_MAC:-}" ]]; then
+    arp -an 2>/dev/null | awk -v mac="${PXE_CLIENT_MAC}" '
+      tolower($4) == tolower(mac) { gsub(/[()]/, "", $2); print $2; exit }
+    '
+  elif [[ -s "${run_dir}/dnsmasq.leases" ]]; then
+    awk 'NF >= 3 { ip=$3 } END { if (ip) print ip }' "${run_dir}/dnsmasq.leases"
+  fi
+}
+
+describe_stage() {
+  case "$1" in
+    *-kernel-start) printf 'vendor sunucusundan kernel indiriliyor' ;;
+    *-kernel-loaded) printf 'kernel indirildi' ;;
+    *-initrd-start) printf 'vendor sunucusundan initramfs indiriliyor' ;;
+    *-initrd-loaded) printf 'initramfs indirildi' ;;
+    *-boot) printf 'kernel başlatılıyor' ;;
+    *-failed) printf 'BOOT HATASI; iPXE UEFI’ye dönüyor' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+print_event() {
+  local line="$1" stage='' target=''
+  case "${line}" in
+    *'GET /boot.ipxe '*) printf '[%s] iPXE ana boot scriptini aldı\n' "$(date '+%H:%M:%S')" ;;
+    *'GET /selected.ipxe '*) printf '[%s] seçili hedef sorgulandı\n' "$(date '+%H:%M:%S')" ;;
+    *'GET /targets/'*.ipxe*)
+      target="$(printf '%s\n' "${line}" | sed -n 's|.*GET /targets/\([^.?/]*\)\.ipxe.*|\1|p')"
+      printf '[%s] hedef scripti alındı: %s\n' "$(date '+%H:%M:%S')" "${target:-unknown}"
+      ;;
+    *'GET /event?stage='*)
+      stage="$(printf '%s\n' "${line}" | sed -n 's|.*GET /event?stage=\([^& ]*\).*|\1|p')"
+      printf '[%s] %s: %s\n' "$(date '+%H:%M:%S')" "${stage%%-*}" "$(describe_stage "${stage}")"
+      ;;
+    *'GET /cloud-init/'*'/user-data '*|*'GET /cloud-init/user-data '*)
+      printf '[%s] canlı sistem cloud-init ayarını aldı; SSH hazırlanıyor\n' "$(date '+%H:%M:%S')"
+      ;;
+    *'GET '*" 404 "*) printf '[%s] HTTP 404: %s\n' "$(date '+%H:%M:%S')" "${line}" ;;
+    *'user class: iPXE'*) printf '[%s] HP iPXE istemcisi DHCP’de görüldü\n' "$(date '+%H:%M:%S')" ;;
+    *'bootfile name:'*) printf '[%s] ProxyDHCP boot adresini gönderdi\n' "$(date '+%H:%M:%S')" ;;
+  esac
+}
+
+cleanup_watch() {
+  [[ -z "${log_watcher_pid:-}" ]] || kill "${log_watcher_pid}" >/dev/null 2>&1 || true
+}
+trap cleanup_watch EXIT INT TERM
+
+printf 'PXE progress monitor (Ctrl-C only closes this viewer; services keep running)\n'
+printf 'Direct vendor download byte counts are not visible on this Mac/router topology.\n'
+
+tail -n 0 -F "${http_log}" "${dnsmasq_log}" 2>/dev/null | while IFS= read -r line; do
+  print_event "${line}"
+done &
+log_watcher_pid=$!
+
+ssh_announced=false
+while kill -0 "${log_watcher_pid}" >/dev/null 2>&1; do
+  ip="$(client_ip || true)"
+  if [[ "${ssh_announced}" == false ]] && [[ -n "${ip}" ]] && nc -z -G 1 "${ip}" 22 >/dev/null 2>&1; then
+    printf '[%s] SSH hazır: pxeboot ssh %s\n' "$(date '+%H:%M:%S')" "${ip}"
+    ssh_announced=true
+  fi
+  sleep 2
+done

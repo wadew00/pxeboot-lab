@@ -5,5 +5,6 @@ chain ${base}/selected.ipxe || goto failed
 exit
 
 :failed
-echo Selected target failed. Opening the iPXE shell.
-shell
+echo Selected target failed. Returning to UEFI/local boot.
+sleep 3
+exit 1

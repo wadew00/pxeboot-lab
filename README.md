@@ -129,7 +129,13 @@ pxeboot ssh
 pxeboot rdp
 pxeboot rescue
 pxeboot topology
+pxeboot watch
 ```
+
+`pxeboot watch` prints concise live milestones from ProxyDHCP, iPXE downloads,
+cloud-init, and SSH readiness. Pressing Ctrl-C closes only the viewer; the PXE
+services keep running. Because installer payloads travel directly from the HP to
+vendor CDNs through the router, the Mac cannot show their byte counters.
 
 In router-managed profiles, `leases` and the automatic `ssh`/`rdp` address lookup use the HP's
 MAC entry in the Mac ARP cache because the router owns the DHCP lease. You may

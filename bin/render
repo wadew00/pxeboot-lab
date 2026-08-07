@@ -12,6 +12,7 @@ key="$(awk 'NF >= 2 { print $1, $2; exit }' "${SSH_PUBLIC_KEY_FILE}")"
 mkdir -p "${ROOT_DIR}/build" "${ROOT_DIR}/www/cloud-init" "${ROOT_DIR}/www/cloud-init/arch"
 mkdir -p "${ROOT_DIR}/www/assets/alpine"
 mkdir -p "${ROOT_DIR}/www/targets"
+printf 'pxeboot-event\n' > "${ROOT_DIR}/www/event"
 
 fedora_password_file="${ROOT_DIR}/.run/fedora-rdp-password"
 if [[ "${FEDORA_RDP_PASSWORD}" == auto ]]; then
