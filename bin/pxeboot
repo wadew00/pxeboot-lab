@@ -49,6 +49,16 @@ recent_target() {
 }
 
 recent_client_ip() {
+  if [[ "${PXE_MODE}" == proxy ]]; then
+    arp -an | awk -v mac="${PXE_CLIENT_MAC}" '
+      tolower($4) == tolower(mac) {
+        gsub(/[()]/, "", $2)
+        print $2
+        exit
+      }
+    '
+    return
+  fi
   local lease_file="${ROOT_DIR}/.run/dnsmasq.leases"
   [[ -r "${lease_file}" ]] || return 1
   awk 'NF >= 3 { ip=$3 } END { if (ip) print ip }' "${lease_file}"
@@ -71,11 +81,24 @@ pid_state() {
   fi
 }
 
+interface_link_state() {
+  local state
+  state="$(ifconfig "${PXE_INTERFACE}" 2>/dev/null | awk '/status:/ { print $2; exit }')"
+  printf '%s\n' "${state:-unknown}"
+}
+
 lab_up() {
   local target="${1:-local}"
+  local active_mode_file="${ROOT_DIR}/.run/active-mode"
   local interface_was_up=false nat_was_up=false previous_target
   is_target "${target}" || die "unknown target: ${target}"
   load_env
+  if [[ -s "${active_mode_file}" ]] && [[ "$(<"${active_mode_file}")" != "${PXE_MODE}" ]]; then
+    die "a $(<"${active_mode_file}") session is still active; run pxeboot down before switching to ${PXE_MODE} mode"
+  fi
+  if [[ "${PXE_MODE}" == proxy ]] && [[ -s "${ROOT_DIR}/.run/pf-token" ]]; then
+    die "dedicated NAT state is still active; run pxeboot down before starting proxy mode"
+  fi
   if [[ ! -s "${ROOT_DIR}/tftp/${IPXE_EFI_BINARY}" ]]; then
     printf 'Missing UEFI chainloader; downloading %s from iPXE...\n' "${IPXE_EFI_BINARY}"
     "${ROOT_DIR}/bin/fetch-assets" ipxe
@@ -104,7 +127,16 @@ lab_up() {
     "${ROOT_DIR}/bin/select" "${previous_target}" || true
     die "service startup failed; network changes were rolled back"
   fi
-  printf '\nPXE lab is ready. Boot the HP using UEFI Network IPv4.\n'
+  printf '%s\n' "${PXE_MODE}" > "${active_mode_file}"
+  link_state="$(interface_link_state)"
+  if [[ "${PXE_MODE}" == proxy ]]; then
+    printf '\nPXE lab is ready on the router LAN. Boot the HP using its iPXE UEFI entry.\n'
+  else
+    printf '\nPXE lab is ready. Boot the HP using UEFI Network IPv4.\n'
+  fi
+  if [[ "${link_state}" != active ]]; then
+    printf 'WARNING: %s has no active Ethernet link (status: %s).\n' "${PXE_INTERFACE}" "${link_state}"
+  fi
   printf 'Watch clients: %s status\n' "$0"
   case "${target}" in
     fedora) printf 'After DHCP: %s rdp\n' "$0" ;;
@@ -118,23 +150,39 @@ lab_down() {
   "${ROOT_DIR}/bin/services-down"
   "${ROOT_DIR}/bin/nat-down"
   "${ROOT_DIR}/bin/interface-down"
+  rm -f "${ROOT_DIR}/.run/active-mode"
   printf 'PXE lab is down; next boot target is local.\n'
 }
 
 show_status() {
   load_env
-  local interface_state=down nat_state=down target=unknown
-  if ifconfig "${PXE_INTERFACE}" 2>/dev/null | grep -Fq "inet ${PXE_SERVER_IP} "; then
-    interface_state="up (${PXE_INTERFACE} ${PXE_SERVER_IP})"
+  local active_mode='' interface_state=down link_state nat_state=down target=unknown
+  [[ ! -s "${ROOT_DIR}/.run/active-mode" ]] || active_mode="$(<"${ROOT_DIR}/.run/active-mode")"
+  if [[ -n "${active_mode}" && "${active_mode}" != "${PXE_MODE}" ]]; then
+    printf 'mode      %s (active session: %s; run pxeboot down)\n' "${PXE_MODE}" "${active_mode}"
+  else
+    printf 'mode      %s\n' "${PXE_MODE}"
   fi
-  [[ -s "${ROOT_DIR}/.run/pf-token" ]] && nat_state=up
+  if ifconfig "${PXE_INTERFACE}" 2>/dev/null | grep -Fq "inet ${PXE_SERVER_IP} "; then
+    link_state="$(interface_link_state)"
+    interface_state="up (${PXE_INTERFACE} ${PXE_SERVER_IP}; link ${link_state})"
+  fi
+  if [[ -s "${ROOT_DIR}/.run/pf-token" ]]; then
+    nat_state=up
+  elif [[ "${PXE_MODE}" == proxy ]]; then
+    nat_state='not required'
+  fi
   target="$(selected_target || printf 'unknown')"
   printf 'target    %s\n' "${target}"
   printf 'interface %s\n' "${interface_state}"
   printf 'NAT       %s\n' "${nat_state}"
   printf 'HTTP      %s\n' "$(pid_state "${ROOT_DIR}/.run/http.pid" "--directory ${ROOT_DIR}/www")"
   printf 'dnsmasq   %s\n' "$(pid_state "${ROOT_DIR}/.run/dnsmasq.pid" "--conf-file=${ROOT_DIR}/build/dnsmasq.conf")"
-  printf '\nLeases:\n'
+  if [[ "${PXE_MODE}" == proxy ]]; then
+    printf '\nClient (router lease):\n'
+  else
+    printf '\nLeases:\n'
+  fi
   "${ROOT_DIR}/bin/leases"
 }
 

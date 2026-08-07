@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
+ENV_FILE="${PXE_ENV_FILE:-${ROOT_DIR}/.env}"
 
 die() {
   printf 'error: %s\n' "$*" >&2
@@ -14,14 +14,26 @@ load_env() {
   [[ -f "${ENV_FILE}" ]] || die "missing .env; copy .env.example to .env and edit it"
   # shellcheck disable=SC1090
   source "${ENV_FILE}"
+  PXE_MODE="${PXE_MODE:-dedicated}"
+  case "${PXE_MODE}" in
+    dedicated|proxy) ;;
+    *) die "PXE_MODE must be dedicated or proxy" ;;
+  esac
   : "${PXE_INTERFACE:?set PXE_INTERFACE in .env}"
-  : "${PXE_UPLINK_INTERFACE:?set PXE_UPLINK_INTERFACE in .env}"
   : "${PXE_SERVER_IP:?set PXE_SERVER_IP in .env}"
   : "${PXE_SUBNET:?set PXE_SUBNET in .env}"
   : "${PXE_NETMASK:?set PXE_NETMASK in .env}"
-  : "${PXE_DHCP_START:?set PXE_DHCP_START in .env}"
-  : "${PXE_DHCP_END:?set PXE_DHCP_END in .env}"
-  : "${PXE_LEASE:?set PXE_LEASE in .env}"
+  if [[ "${PXE_MODE}" == dedicated ]]; then
+    : "${PXE_UPLINK_INTERFACE:?set PXE_UPLINK_INTERFACE in .env for dedicated mode}"
+    : "${PXE_DHCP_START:?set PXE_DHCP_START in .env for dedicated mode}"
+    : "${PXE_DHCP_END:?set PXE_DHCP_END in .env for dedicated mode}"
+    : "${PXE_LEASE:?set PXE_LEASE in .env for dedicated mode}"
+  else
+    PXE_UPLINK_INTERFACE="${PXE_UPLINK_INTERFACE:-${PXE_INTERFACE}}"
+    : "${PXE_CLIENT_MAC:?set PXE_CLIENT_MAC in .env for proxy mode}"
+    [[ "${PXE_CLIENT_MAC}" =~ ^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$ ]] || \
+      die "PXE_CLIENT_MAC must be a colon-separated MAC address"
+  fi
   : "${PXE_HTTP_PORT:?set PXE_HTTP_PORT in .env}"
   : "${IPXE_EFI_BINARY:?set IPXE_EFI_BINARY in .env}"
   case "${IPXE_EFI_BINARY}" in

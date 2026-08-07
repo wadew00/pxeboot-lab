@@ -4,6 +4,7 @@ source "$(cd "$(dirname "$0")" && pwd)/common"
 load_env
 
 failed=0
+printf 'mode %s\n' "${PXE_MODE}"
 for command_name in dnsmasq curl python3 tar openssl; do
   if command -v "${command_name}" >/dev/null 2>&1; then
     printf 'ok   command %-10s %s\n' "${command_name}" "$(command -v "${command_name}")"
@@ -22,8 +23,30 @@ fi
 
 if ifconfig "${PXE_INTERFACE}" 2>/dev/null | grep -Fq "inet ${PXE_SERVER_IP} "; then
   printf 'ok   interface %s has %s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
+elif [[ "${PXE_MODE}" == proxy ]]; then
+  printf 'FAIL proxy interface %s does not have configured address %s\n' \
+    "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
+  failed=1
 else
   printf 'WARN interface %s does not currently have %s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
+fi
+
+if [[ "${PXE_MODE}" == proxy ]]; then
+  printf 'ok   ProxyDHCP restricted to HP MAC %s\n' "${PXE_CLIENT_MAC}"
+  if command -v arp >/dev/null 2>&1; then
+    client_ip="$(arp -an | awk -v mac="${PXE_CLIENT_MAC}" '
+      tolower($4) == tolower(mac) {
+        gsub(/[()]/, "", $2)
+        print $2
+        exit
+      }
+    ')"
+    if [[ -n "${client_ip}" ]]; then
+      printf 'ok   HP visible through router at %s\n' "${client_ip}"
+    else
+      printf 'WARN HP is not currently in the Mac ARP cache\n'
+    fi
+  fi
 fi
 
 if [[ -r "${SSH_PUBLIC_KEY_FILE}" ]]; then

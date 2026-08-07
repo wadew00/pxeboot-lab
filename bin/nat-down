@@ -8,7 +8,11 @@ require_command sysctl
 state_file="${ROOT_DIR}/.run/ip-forwarding.before"
 token_file="${ROOT_DIR}/.run/pf-token"
 if [[ ! -s "${token_file}" ]] && [[ ! -s "${state_file}" ]]; then
-  printf 'PXE NAT is not enabled\n'
+  if [[ "${PXE_MODE}" == proxy ]]; then
+    printf 'NAT is not used in proxy mode\n'
+  else
+    printf 'PXE NAT is not enabled\n'
+  fi
   exit 0
 fi
 

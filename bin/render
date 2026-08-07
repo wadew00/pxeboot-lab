@@ -30,19 +30,27 @@ fi
 
 printf '%s\n' "${key}" > "${ROOT_DIR}/www/authorized_keys"
 
+dnsmasq_template="${ROOT_DIR}/config/dnsmasq.conf.in"
+if [[ "${PXE_MODE}" == proxy ]]; then
+  dnsmasq_template="${ROOT_DIR}/config/dnsmasq-proxy.conf.in"
+fi
+pxe_subnet_address="${PXE_SUBNET%/*}"
+
 sed \
   -e "s|@@ROOT_DIR@@|${ROOT_DIR}|g" \
   -e "s|@@PXE_INTERFACE@@|${PXE_INTERFACE}|g" \
   -e "s|@@PXE_SERVER_IP@@|${PXE_SERVER_IP}|g" \
-  -e "s|@@PXE_DHCP_START@@|${PXE_DHCP_START}|g" \
-  -e "s|@@PXE_DHCP_END@@|${PXE_DHCP_END}|g" \
+  -e "s|@@PXE_SUBNET_ADDRESS@@|${pxe_subnet_address}|g" \
+  -e "s|@@PXE_CLIENT_MAC@@|${PXE_CLIENT_MAC:-}|g" \
+  -e "s|@@PXE_DHCP_START@@|${PXE_DHCP_START:-}|g" \
+  -e "s|@@PXE_DHCP_END@@|${PXE_DHCP_END:-}|g" \
   -e "s|@@PXE_NETMASK@@|${PXE_NETMASK}|g" \
-  -e "s|@@PXE_LEASE@@|${PXE_LEASE}|g" \
+  -e "s|@@PXE_LEASE@@|${PXE_LEASE:-}|g" \
   -e "s|@@PXE_HTTP_PORT@@|${PXE_HTTP_PORT}|g" \
   -e "s|@@IPXE_EFI_BINARY@@|${IPXE_EFI_BINARY}|g" \
   -e "s|@@PXE_SERVICE_USER@@|${PXE_SERVICE_USER}|g" \
   -e "s|@@PXE_SERVICE_GROUP@@|${PXE_SERVICE_GROUP}|g" \
-  "${ROOT_DIR}/config/dnsmasq.conf.in" > "${ROOT_DIR}/build/dnsmasq.conf"
+  "${dnsmasq_template}" > "${ROOT_DIR}/build/dnsmasq.conf"
 
 sed \
   -e "s|@@PXE_SERVER_IP@@|${PXE_SERVER_IP}|g" \
@@ -115,4 +123,5 @@ if [[ ! -s "${ROOT_DIR}/www/selected.ipxe" ]]; then
   "${ROOT_DIR}/bin/select" local
 fi
 
-printf 'rendered configuration for %s:%s on %s\n' "${PXE_SERVER_IP}" "${PXE_HTTP_PORT}" "${PXE_INTERFACE}"
+printf 'rendered %s configuration for %s:%s on %s\n' \
+  "${PXE_MODE}" "${PXE_SERVER_IP}" "${PXE_HTTP_PORT}" "${PXE_INTERFACE}"

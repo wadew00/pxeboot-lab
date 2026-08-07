@@ -4,6 +4,27 @@ source "$(cd "$(dirname "$0")" && pwd)/common"
 load_env
 require_command ifconfig
 
+state_file="${ROOT_DIR}/.run/interface-alias"
+if [[ -s "${state_file}" ]]; then
+  managed_interface="$(sed -n '1p' "${state_file}")"
+  managed_ip="$(sed -n '2p' "${state_file}")"
+  [[ "${managed_interface}" =~ ^[A-Za-z0-9._:-]+$ ]] || die "invalid managed interface state"
+  [[ "${managed_ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid managed IP state"
+  if ifconfig "${managed_interface}" 2>/dev/null | grep -Fq "inet ${managed_ip} "; then
+    sudo ifconfig "${managed_interface}" inet "${managed_ip}" -alias
+    printf 'removed managed address %s from %s\n' "${managed_ip}" "${managed_interface}"
+  else
+    printf '%s does not have managed address %s\n' "${managed_interface}" "${managed_ip}"
+  fi
+  rm -f "${state_file}"
+  exit 0
+fi
+
+if [[ "${PXE_MODE}" == proxy ]]; then
+  printf '%s is router-managed in proxy mode; address unchanged\n' "${PXE_INTERFACE}"
+  exit 0
+fi
+
 ifconfig "${PXE_INTERFACE}" >/dev/null 2>&1 || die "interface not found: ${PXE_INTERFACE}"
 if ! ifconfig "${PXE_INTERFACE}" | grep -Fq "inet ${PXE_SERVER_IP} "; then
   printf '%s does not have %s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}"

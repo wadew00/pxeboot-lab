@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 
 source "$(cd "$(dirname "$0")" && pwd)/common"
+load_env
+
+if [[ "${PXE_MODE}" == proxy ]]; then
+  require_command arp
+  require_command awk
+  client_ip="$(arp -an | awk -v mac="${PXE_CLIENT_MAC}" '
+    tolower($4) == tolower(mac) {
+      gsub(/[()]/, "", $2)
+      print $2
+      exit
+    }
+  ')"
+  if [[ -n "${client_ip}" ]]; then
+    printf '%-15s  %-17s  %s\n' "${client_ip}" "${PXE_CLIENT_MAC}" "HP (router lease via ARP)"
+  else
+    printf 'HP is not in the Mac ARP cache yet (%s); the router owns DHCP leases\n' "${PXE_CLIENT_MAC}"
+  fi
+  exit 0
+fi
 
 lease_file="${ROOT_DIR}/.run/dnsmasq.leases"
 if [[ -s "${lease_file}" ]]; then
@@ -8,4 +27,3 @@ if [[ -s "${lease_file}" ]]; then
 else
   printf 'no DHCP leases yet (%s)\n' "${lease_file}"
 fi
-

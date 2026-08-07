@@ -18,16 +18,28 @@ No target in this starter configuration performs an unattended disk write. Debia
 
 ## Network layout
 
-Use a dedicated USB Ethernet adapter or isolated VLAN. The examples assume:
+The default configuration matches this lab's shared-router layout:
 
 ```text
-Internet/Wi-Fi --- Mac
-                  192.168.50.1/24 (dedicated Ethernet)
-                         |
-                         +--- HP EliteDesk (PXE boot)
+                         +--- Mac Wi-Fi en0 (192.168.1.106)
+Internet --- router -----+
+                         +--- HP Ethernet eno1 (a0:48:1c:97:e6:95)
 ```
 
-Do not run this DHCP service on a normal LAN that already has DHCP. The installer needs internet access to fetch vendor-hosted boot payloads and packages. `bin/nat-up` provides this through the Mac's uplink using an isolated PF anchor. macOS Internet Sharing normally starts its own DHCP service and therefore must not be enabled on the same interface as this `dnsmasq` instance.
+`PXE_MODE=proxy` makes dnsmasq a ProxyDHCP server. The router remains the only
+server that assigns addresses, gateways, and DNS; the Mac supplies only PXE boot
+metadata. Replies are restricted to `PXE_CLIENT_MAC`, so other LAN clients are
+ignored. This mode neither assigns an address to `en0` nor enables PF/NAT.
+
+Reserve `PXE_SERVER_IP` for the Mac in the router. The generated boot URLs contain
+that address, so `pxeboot doctor` deliberately fails if `en0` no longer owns it.
+The current HP address is discovered from the Mac's ARP cache; the router still
+owns the actual lease.
+
+The older isolated-cable layout remains available with `PXE_MODE=dedicated`.
+That mode needs a separate Ethernet interface, its own DHCP range, and
+`PXE_UPLINK_INTERFACE`; `pxeboot` then adds the private address and enables NAT.
+Never use `dedicated` mode on a normal LAN that already has DHCP.
 
 ## Setup
 
@@ -46,6 +58,10 @@ All normal operations go through the globally linked `pxeboot` command. The wrap
 
 Only the EFI iPXE chainloader is downloaded to the Mac. Debian, Fedora, Arch, and Alpine fetch their boot payloads directly from their official CDN. Ubuntu fetches its kernel, initrd, and live-server ISO directly from Canonical. The vendor URLs are configurable in `.env`.
 
+The small HTTP server is still required for files unique to this lab: the generated
+iPXE selector, preseed/kickstart/NoCloud data, and the SSH public key. Large distro
+payloads do not pass through or get stored on the Mac.
+
 ### Why Ubuntu still needs an ISO
 
 Ubuntu's netboot `linux` and `initrd` only bootstrap the live-server environment. During boot, the initrd downloads the URL passed with `url=`, loop-mounts that ISO, and uses its live filesystem as the Subiquity installer runtime. The ISO is therefore required by Ubuntu's installer design, but it is downloaded by the HP directly from Canonical and is never stored on the Mac.
@@ -58,7 +74,12 @@ Start the entire lab and choose the installer in one command:
 pxeboot up debian
 ```
 
-This renders the generated files, assigns the `.env` address to the configured PXE interface, enables NAT, and starts HTTP plus dnsmasq in the background. macOS may ask for the administrator password. The target can be `debian`, `ubuntu`, `fedora`, `arch`, `alpine`, `menu`, or the safe `local` fallback. A target name alone is shorthand, for example:
+This renders the generated files and starts HTTP plus dnsmasq in the background.
+In the default proxy mode, the Mac's Wi-Fi address and the router configuration are
+left untouched. macOS may ask for the administrator password because dnsmasq binds
+privileged PXE ports. The target can be `debian`, `ubuntu`, `fedora`, `arch`,
+`alpine`, `menu`, or the safe `local` fallback. A target name alone is shorthand,
+for example:
 
 ```sh
 pxeboot fedora
@@ -76,9 +97,14 @@ pxeboot rdp
 pxeboot rescue
 ```
 
-`ssh` uses the newest DHCP lease and the selected distro's installer username. You may override it with `pxeboot ssh CLIENT_IP`. `rdp` prints Fedora's endpoint and generated credentials; use `pxeboot rdp CLIENT_IP` if the lease cannot be inferred. `rescue` starts the headless Arch live environment without launching an installer; after it receives a lease, `pxeboot ssh` connects as root for disk, filesystem, network, and recovery work.
+In proxy mode, `leases` and the automatic `ssh`/`rdp` address lookup use the HP's
+MAC entry in the Mac ARP cache because the router owns the DHCP lease. You may
+always override it with `pxeboot ssh CLIENT_IP` or `pxeboot rdp CLIENT_IP`.
+`rescue` starts the headless Arch live environment without launching an installer;
+`pxeboot ssh` then connects as root for disk, filesystem, network, and recovery work.
 
-When the lab is finished, stop the managed services, clear only this lab's NAT state, remove the PXE interface address, and restore the safe local-boot selection:
+When the lab is finished, stop the managed services and restore the safe local-boot
+selection. Proxy mode does not change the Wi-Fi address, router DHCP, or NAT:
 
 ```sh
 pxeboot down
@@ -118,7 +144,11 @@ The RDP password is necessarily present in the installer's kernel command line a
 
 ## HP EliteDesk firmware settings
 
-Enable UEFI network boot over IPv4 and place it ahead of the target disk for the initial boot. This lab intentionally has no legacy BIOS path. Disable Secure Boot for the unsigned upstream iPXE binary.
+This HP already has a local `iPXE UEFI` entry on its EFI System Partition. Use that
+entry (or set it once with `efibootmgr --bootnext`) for the first proxy-mode boot.
+The local iPXE client gets its address from the router and its script URL from the
+Mac. This lab intentionally has no legacy BIOS path. Keep Secure Boot disabled for
+the unsigned iPXE binary.
 
 The default `snponly.efi` reuses the HP firmware's UEFI Simple Network Protocol driver and only touches the NIC from which it was chainloaded. If it hangs while initializing or loses the NIC, set `IPXE_EFI_BINARY=ipxe.efi`, rerun `./bin/fetch-assets ipxe`, and then `./bin/render` to use iPXE's native driver instead.
 
@@ -126,17 +156,28 @@ Once installed, either restore disk-first boot order or leave the server target 
 
 ## How selection works
 
-The UEFI firmware downloads iPXE over TFTP. The second DHCP exchange identifies iPXE and sends it `http://SERVER:PORT/boot.ipxe`. That script chains `selected.ipxe`, which is atomically changed by `bin/select`. This avoids blind keyboard timing on a headless machine and avoids the classic PXE-to-iPXE chainloading loop.
+In proxy mode the HP can start the iPXE binary already installed on its EFI System
+Partition. The router supplies its normal LAN address and the Mac's ProxyDHCP reply
+sends `http://SERVER:PORT/boot.ipxe`. Firmware network boot also remains possible:
+the Mac can first serve the UEFI chainloader over TFTP. The script chains
+`selected.ipxe`, which is atomically changed by `bin/select`. This avoids blind
+keyboard timing on a headless machine and avoids the classic iPXE chainloading loop.
 
 ## Security and operational notes
 
 - Installer SSH accepts only the public key configured by `SSH_PUBLIC_KEY_FILE`; no private key is copied.
 - dnsmasq opens its privileged sockets as root, then drops to the invoking Mac user by default so it can read the project-local TFTP root. `PXE_SERVICE_USER` and `PXE_SERVICE_GROUP` can override this for a dedicated account.
-- The HTTP and TFTP services are intentionally plain text and belong only on an isolated provisioning network.
+- HTTP and TFTP are intentionally plain text. ProxyDHCP is MAC-restricted, but the
+  generated HTTP files still assume the home LAN is trusted.
 - `local` is the default and must remain the idle state.
 - Verify the client disk before confirming any partitioning screen.
 - Distro payloads come directly from vendor HTTPS endpoints on every boot. Their checksums/signatures are not pinned by this lab yet; add verification before treating it as a production provisioning system.
 
 ## Troubleshooting
 
-Run `pxeboot doctor` first, then inspect `pxeboot status` and `pxeboot logs`. If the firmware gets an address but never loads iPXE, check UDP 69 and the TFTP root. If iPXE loads repeatedly, the DHCP option-175 match is not being seen. If the installer boots but SSH is unreachable, use `pxeboot leases`, then check that the selected distro received the public key and that the lab network is not being filtered by the macOS firewall.
+Run `pxeboot doctor` first, then inspect `pxeboot status` and `pxeboot logs`. In
+proxy mode, the router/AP must bridge PXE broadcasts between wired Ethernet and
+Wi-Fi; disable wireless/client isolation if it blocks them. If firmware gets an
+address but never loads iPXE, check UDP 69 and the TFTP root. If iPXE loads but never
+gets `boot.ipxe`, check UDP 4011 and the dnsmasq log. If the installer boots but SSH
+is unreachable, use `pxeboot leases`, then check the public key and macOS firewall.

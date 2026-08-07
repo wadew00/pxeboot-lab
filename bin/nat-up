@@ -2,6 +2,12 @@
 
 source "$(cd "$(dirname "$0")" && pwd)/common"
 load_env
+
+if [[ "${PXE_MODE}" == proxy ]]; then
+  printf 'NAT not required in proxy mode; the router remains the client gateway\n'
+  exit 0
+fi
+
 require_command pfctl
 require_command sysctl
 require_command awk

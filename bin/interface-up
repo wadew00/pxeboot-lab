@@ -5,10 +5,22 @@ load_env
 require_command ifconfig
 
 ifconfig "${PXE_INTERFACE}" >/dev/null 2>&1 || die "interface not found: ${PXE_INTERFACE}"
+
+if [[ "${PXE_MODE}" == proxy ]]; then
+  if ! ifconfig "${PXE_INTERFACE}" | grep -Fq "inet ${PXE_SERVER_IP} "; then
+    die "proxy mode does not alter ${PXE_INTERFACE}; it must already have ${PXE_SERVER_IP}"
+  fi
+  printf 'using existing %s address %s (proxy mode; unchanged)\n' \
+    "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
+  exit 0
+fi
+
 if ifconfig "${PXE_INTERFACE}" | grep -Fq "inet ${PXE_SERVER_IP} "; then
   printf '%s already has %s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
   exit 0
 fi
 
 sudo ifconfig "${PXE_INTERFACE}" inet "${PXE_SERVER_IP}" netmask "${PXE_NETMASK}" alias
+mkdir -p "${ROOT_DIR}/.run"
+printf '%s\n%s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}" > "${ROOT_DIR}/.run/interface-alias"
 printf 'configured %s with %s (%s)\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}" "${PXE_NETMASK}"
