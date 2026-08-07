@@ -2,5 +2,5 @@ version: 2
 ethernets:
   pxe:
     match:
-      macaddress: "a0:48:1c:97:e6:95"
+      name: "en*"
     dhcp4: true
