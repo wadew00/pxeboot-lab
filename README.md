@@ -36,16 +36,13 @@ Requirements: Homebrew `dnsmasq`, `curl`, and `python3`. On this Mac, `dnsmasq` 
 ```sh
 cp .env.example .env
 $EDITOR .env
-./pxeboot doctor
+ln -s "$PWD/pxeboot" /opt/homebrew/bin/pxeboot
+pxeboot doctor
 ```
 
 On the first `up`, `pxeboot` downloads the configured UEFI iPXE chainloader if it is missing. It does not download distro installer payloads to the Mac.
 
-All normal operations go through `./pxeboot`. If you want to call it from any directory without the leading `./`, optionally add a symlink:
-
-```sh
-sudo ln -s "$PWD/pxeboot" /usr/local/bin/pxeboot
-```
+All normal operations go through the globally linked `pxeboot` command. The wrapper resolves its symlink back to this repository, so it works from any directory.
 
 Only the EFI iPXE chainloader is downloaded to the Mac. Debian, Fedora, Arch, and Alpine fetch their boot payloads directly from their official CDN. Ubuntu fetches its kernel, initrd, and live-server ISO directly from Canonical. The vendor URLs are configurable in `.env`.
 
@@ -58,32 +55,33 @@ Ubuntu's netboot `linux` and `initrd` only bootstrap the live-server environment
 Start the entire lab and choose the installer in one command:
 
 ```sh
-./pxeboot up debian
+pxeboot up debian
 ```
 
 This renders the generated files, assigns the `.env` address to the configured PXE interface, enables NAT, and starts HTTP plus dnsmasq in the background. macOS may ask for the administrator password. The target can be `debian`, `ubuntu`, `fedora`, `arch`, `alpine`, `menu`, or the safe `local` fallback. A target name alone is shorthand, for example:
 
 ```sh
-./pxeboot fedora
+pxeboot fedora
 ```
 
 Useful commands while it is running:
 
 ```sh
-./pxeboot status
-./pxeboot leases
-./pxeboot logs
-./pxeboot select arch
-./pxeboot ssh
-./pxeboot rdp
+pxeboot status
+pxeboot leases
+pxeboot logs
+pxeboot select arch
+pxeboot ssh
+pxeboot rdp
+pxeboot rescue
 ```
 
-`ssh` uses the newest DHCP lease and the selected distro's installer username. You may override it with `./pxeboot ssh CLIENT_IP`. `rdp` prints Fedora's endpoint and generated credentials; use `./pxeboot rdp CLIENT_IP` if the lease cannot be inferred.
+`ssh` uses the newest DHCP lease and the selected distro's installer username. You may override it with `pxeboot ssh CLIENT_IP`. `rdp` prints Fedora's endpoint and generated credentials; use `pxeboot rdp CLIENT_IP` if the lease cannot be inferred. `rescue` starts the headless Arch live environment without launching an installer; after it receives a lease, `pxeboot ssh` connects as root for disk, filesystem, network, and recovery work.
 
 When the lab is finished, stop the managed services, clear only this lab's NAT state, remove the PXE interface address, and restore the safe local-boot selection:
 
 ```sh
-./pxeboot down
+pxeboot down
 ```
 
 The component scripts under `bin/` remain available for diagnostics, but routine startup and shutdown should use `pxeboot` so service PID and log state stay consistent.
@@ -91,7 +89,7 @@ The component scripts under `bin/` remain available for diagnostics, but routine
 After the machine has fetched the selected target, you can immediately return the server to the safe default without stopping the lab:
 
 ```sh
-./pxeboot select local
+pxeboot select local
 ```
 
 SSH usernames and entry commands are:
@@ -110,8 +108,8 @@ Alpine: ssh root@CLIENT_IP       then run setup-alpine
 Fedora boots Anaconda with its official RDP remote-install mode. After selecting and booting Fedora, get the client address and temporary credentials:
 
 ```sh
-./pxeboot leases
-./pxeboot rdp
+pxeboot leases
+pxeboot rdp
 ```
 
 Connect any RDP client to `CLIENT_IP:3389` and complete the normal Anaconda UI remotely. The default `FEDORA_RDP_PASSWORD=auto` generates a random password under the ignored `.run/` directory; it is never committed. `ssh root@CLIENT_IP` remains available with your SSH key for logs and maintenance, but the installation UI is in RDP.
@@ -140,4 +138,4 @@ The UEFI firmware downloads iPXE over TFTP. The second DHCP exchange identifies 
 
 ## Troubleshooting
 
-Run `./pxeboot doctor` first, then inspect `./pxeboot status` and `./pxeboot logs`. If the firmware gets an address but never loads iPXE, check UDP 69 and the TFTP root. If iPXE loads repeatedly, the DHCP option-175 match is not being seen. If the installer boots but SSH is unreachable, use `./pxeboot leases`, then check that the selected distro received the public key and that the lab network is not being filtered by the macOS firewall.
+Run `pxeboot doctor` first, then inspect `pxeboot status` and `pxeboot logs`. If the firmware gets an address but never loads iPXE, check UDP 69 and the TFTP root. If iPXE loads repeatedly, the DHCP option-175 match is not being seen. If the installer boots but SSH is unreachable, use `pxeboot leases`, then check that the selected distro received the public key and that the lab network is not being filtered by the macOS firewall.

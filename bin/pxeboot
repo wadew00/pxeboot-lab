@@ -8,6 +8,7 @@ Usage:
   pxeboot up [target]       Start the complete lab (default target: local)
   pxeboot down              Safely stop the complete lab
   pxeboot restart [target]  Restart the lab
+  pxeboot rescue            Start the headless Arch rescue environment
   pxeboot select TARGET     Change the next boot target
   pxeboot TARGET            Shortcut for: pxeboot up TARGET
   pxeboot status            Show services, selection, and client leases
@@ -183,6 +184,11 @@ case "${command_name}" in
     restart_target="${1:-$(selected_target || printf 'local')}"
     lab_down
     lab_up "${restart_target}"
+    ;;
+  rescue)
+    [[ "$#" -eq 0 ]] || die "usage: pxeboot rescue"
+    lab_up arch
+    printf 'Rescue mode uses the Arch live environment; run %s ssh after DHCP.\n' "$0"
     ;;
   select)
     [[ "$#" -eq 1 ]] || die "usage: pxeboot select TARGET"
