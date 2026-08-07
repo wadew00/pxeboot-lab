@@ -1,12 +1,12 @@
 #!ipxe
 set base @@PXE_BOOT_URL@@
-set archiso @@ARCHISO_URL@@
 set ipxe_arch ${base}/vendor/arch
+set archiso ${ipxe_arch}
 imgfetch --name pxestatus ${base}/event?stage=arch-kernel-start || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
 imgfetch --name pxestatus ${base}/event?stage=arch-net-ip-${net0/ip}-gw-${gateway}-dns-${dns} || echo Network status callback failed
 imgfree pxestatus || echo Status cleanup skipped
-kernel ${ipxe_arch}/arch/boot/x86_64/vmlinuz-linux ip=dhcp archiso_http_srv=${archiso}/ archisobasedir=arch cms_verify=y ds=nocloud-net;s=${base}/cloud-init/arch/ || goto failed
+kernel ${ipxe_arch}/arch/boot/x86_64/vmlinuz-linux ip=dhcp BOOTIF=01-${net0/mac:hexhyp} archiso_http_srv=${archiso}/ archisobasedir=arch cms_verify=y ds=nocloud-net;s=${base}/cloud-init/arch/ || goto failed
 imgfetch --name pxestatus ${base}/event?stage=arch-kernel-loaded || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
 imgfetch --name pxestatus ${base}/event?stage=arch-initrd-start || echo Status callback failed
