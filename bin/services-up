@@ -21,9 +21,20 @@ pid_matches() {
 http_started=false
 http_pattern="--directory ${ROOT_DIR}/www"
 
+cleanup_on_exit() {
+  local status=$?
+  trap - EXIT
+  if [[ "${status}" -ne 0 ]] && [[ "${http_started}" == true ]]; then
+    "${ROOT_DIR}/bin/services-down" --http-only || true
+  fi
+  exit "${status}"
+}
+trap cleanup_on_exit EXIT
+
 if [[ -s "${http_pid_file}" ]] && pid_matches "$(<"${http_pid_file}")" "${http_pattern}"; then
   printf 'HTTP server already running (pid %s)\n' "$(<"${http_pid_file}")"
 else
+  rm -f "${http_pid_file}"
   : > "${run_dir}/http.log"
   nohup python3 -m http.server "${PXE_HTTP_PORT}" \
     --bind "${PXE_SERVER_IP}" \
@@ -45,15 +56,20 @@ dnsmasq_pattern="--conf-file=${ROOT_DIR}/build/dnsmasq.conf"
 if [[ -s "${dnsmasq_pid_file}" ]] && pid_matches "$(<"${dnsmasq_pid_file}")" "${dnsmasq_pattern}"; then
   printf 'dnsmasq already running (pid %s)\n' "$(<"${dnsmasq_pid_file}")"
 else
+  rm -f "${dnsmasq_pid_file}" "${run_dir}/dnsmasq.log"
   : > "${run_dir}/dnsmasq.log"
   if ! sudo dnsmasq --conf-file="${ROOT_DIR}/build/dnsmasq.conf"; then
-    [[ "${http_started}" == false ]] || "${ROOT_DIR}/bin/services-down" --http-only
+    "${ROOT_DIR}/bin/services-down" || true
+    http_started=false
     die "dnsmasq failed; inspect ${run_dir}/dnsmasq.log"
   fi
   sleep 0.2
   if [[ ! -s "${dnsmasq_pid_file}" ]] || ! pid_matches "$(<"${dnsmasq_pid_file}")" "${dnsmasq_pattern}"; then
-    [[ "${http_started}" == false ]] || "${ROOT_DIR}/bin/services-down" --http-only
+    "${ROOT_DIR}/bin/services-down" || true
+    http_started=false
     die "dnsmasq did not stay running; inspect ${run_dir}/dnsmasq.log"
   fi
   printf 'dnsmasq started (pid %s)\n' "$(<"${dnsmasq_pid_file}")"
 fi
+
+trap - EXIT

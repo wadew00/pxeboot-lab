@@ -213,7 +213,8 @@ case "${command_name}" in
   logs)
     [[ "$#" -eq 0 ]] || die "usage: pxeboot logs"
     mkdir -p "${ROOT_DIR}/.run"
-    touch "${ROOT_DIR}/.run/http.log" "${ROOT_DIR}/.run/dnsmasq.log"
+    [[ -e "${ROOT_DIR}/.run/http.log" ]] || : > "${ROOT_DIR}/.run/http.log"
+    [[ -e "${ROOT_DIR}/.run/dnsmasq.log" ]] || : > "${ROOT_DIR}/.run/dnsmasq.log"
     exec tail -F "${ROOT_DIR}/.run/http.log" "${ROOT_DIR}/.run/dnsmasq.log"
     ;;
   doctor)
