@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+load_env
+require_command pfctl
+require_command sysctl
+
+sudo pfctl -a com.apple/pxe-lab -F all >/dev/null
+state_file="${ROOT_DIR}/.run/ip-forwarding.before"
+token_file="${ROOT_DIR}/.run/pf-token"
+if [[ -r "${state_file}" ]] && [[ "$(<"${state_file}")" == 0 ]]; then
+  sudo sysctl -w net.inet.ip.forwarding=0 >/dev/null
+fi
+if [[ -s "${token_file}" ]]; then
+  sudo pfctl -X "$(<"${token_file}")" >/dev/null
+fi
+rm -f "${state_file}" "${token_file}"
+printf 'PXE NAT anchor cleared\n'

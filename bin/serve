@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+load_env
+require_command dnsmasq
+require_command python3
+
+"${ROOT_DIR}/bin/render"
+mkdir -p "${ROOT_DIR}/.run"
+
+cleanup() {
+  if [[ -n "${http_pid:-}" ]]; then
+    kill "${http_pid}" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+python3 -m http.server "${PXE_HTTP_PORT}" --bind "${PXE_SERVER_IP}" --directory "${ROOT_DIR}/www" &
+http_pid=$!
+printf '%s\n' "${http_pid}" > "${ROOT_DIR}/.run/http.pid"
+printf 'HTTP serving http://%s:%s/ (pid %s)\n' "${PXE_SERVER_IP}" "${PXE_HTTP_PORT}" "${http_pid}"
+printf 'Starting dnsmasq; sudo may ask for the Mac administrator password. Ctrl-C stops both services.\n'
+sudo dnsmasq --keep-in-foreground --conf-file="${ROOT_DIR}/build/dnsmasq.conf"
+

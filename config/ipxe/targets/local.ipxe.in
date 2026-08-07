@@ -1,0 +1,4 @@
+#!ipxe
+echo Continuing to the next device in firmware boot order...
+exit
+

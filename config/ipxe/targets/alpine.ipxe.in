@@ -1,0 +1,6 @@
+#!ipxe
+set base http://${next-server}:@@PXE_HTTP_PORT@@
+set alpine_netboot @@ALPINE_NETBOOT_URL@@
+kernel ${alpine_netboot}/vmlinuz-lts modules=loop,squashfs ip=dhcp alpine_repo=@@ALPINE_REPO_URL@@ modloop=${alpine_netboot}/modloop-lts apkovl=${base}/assets/alpine/headless.apkovl.tar.gz
+initrd ${alpine_netboot}/initramfs-lts
+boot

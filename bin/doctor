@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+load_env
+
+failed=0
+for command_name in dnsmasq curl python3 tar; do
+  if command -v "${command_name}" >/dev/null 2>&1; then
+    printf 'ok   command %-10s %s\n' "${command_name}" "$(command -v "${command_name}")"
+  else
+    printf 'FAIL command %s not found\n' "${command_name}"
+    failed=1
+  fi
+done
+
+if ifconfig "${PXE_INTERFACE}" >/dev/null 2>&1; then
+  printf 'ok   interface %s exists\n' "${PXE_INTERFACE}"
+else
+  printf 'FAIL interface %s does not exist\n' "${PXE_INTERFACE}"
+  failed=1
+fi
+
+if ifconfig "${PXE_INTERFACE}" 2>/dev/null | grep -Fq "inet ${PXE_SERVER_IP} "; then
+  printf 'ok   interface %s has %s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
+else
+  printf 'WARN interface %s does not currently have %s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
+fi
+
+if [[ -r "${SSH_PUBLIC_KEY_FILE}" ]]; then
+  key_fields="$(awk 'NF >= 2 { print $1, $2; exit }' "${SSH_PUBLIC_KEY_FILE}")"
+  if [[ "${key_fields}" == ssh-*\ * || "${key_fields}" == ecdsa-*\ * ]]; then
+    printf 'ok   SSH public key %s\n' "${SSH_PUBLIC_KEY_FILE}"
+  else
+    printf 'FAIL %s does not look like an OpenSSH public key\n' "${SSH_PUBLIC_KEY_FILE}"
+    failed=1
+  fi
+else
+  printf 'FAIL SSH public key is not readable: %s\n' "${SSH_PUBLIC_KEY_FILE}"
+  failed=1
+fi
+
+for asset in "tftp/${IPXE_EFI_BINARY}"; do
+  if [[ -s "${ROOT_DIR}/${asset}" ]]; then
+    printf 'ok   asset %s\n' "${asset}"
+  else
+    printf 'WARN asset missing: %s\n' "${asset}"
+  fi
+done
+
+if [[ -s "${ROOT_DIR}/www/assets/alpine/headless.apkovl.tar.gz" ]]; then
+  printf 'ok   generated Alpine SSH overlay\n'
+else
+  printf 'WARN Alpine SSH overlay is missing; run ./bin/render\n'
+fi
+
+exit "${failed}"

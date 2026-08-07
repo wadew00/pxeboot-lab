@@ -1,0 +1,13 @@
+.env
+.DS_Store
+.run/
+build/
+tftp/
+www/assets/
+www/authorized_keys
+www/boot.ipxe
+www/cloud-init/meta-data
+www/cloud-init/user-data
+www/preseed.cfg
+www/selected.ipxe
+www/targets/

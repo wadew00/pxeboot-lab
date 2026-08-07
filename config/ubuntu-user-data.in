@@ -1,0 +1,10 @@
+#cloud-config
+# All installer sections remain interactive. This file exists to provision the
+# SSH key into the ephemeral `installer` account, not to authorize disk writes.
+ssh_authorized_keys:
+@@SSH_PUBLIC_KEY@@
+autoinstall:
+  version: 1
+  interactive-sections:
+    - "*"
+

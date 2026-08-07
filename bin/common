@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="${ROOT_DIR}/.env"
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+load_env() {
+  [[ -f "${ENV_FILE}" ]] || die "missing .env; copy .env.example to .env and edit it"
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+  : "${PXE_INTERFACE:?set PXE_INTERFACE in .env}"
+  : "${PXE_UPLINK_INTERFACE:?set PXE_UPLINK_INTERFACE in .env}"
+  : "${PXE_SERVER_IP:?set PXE_SERVER_IP in .env}"
+  : "${PXE_SUBNET:?set PXE_SUBNET in .env}"
+  : "${PXE_NETMASK:?set PXE_NETMASK in .env}"
+  : "${PXE_DHCP_START:?set PXE_DHCP_START in .env}"
+  : "${PXE_DHCP_END:?set PXE_DHCP_END in .env}"
+  : "${PXE_LEASE:?set PXE_LEASE in .env}"
+  : "${PXE_HTTP_PORT:?set PXE_HTTP_PORT in .env}"
+  : "${IPXE_EFI_BINARY:?set IPXE_EFI_BINARY in .env}"
+  case "${IPXE_EFI_BINARY}" in
+    snponly.efi|ipxe.efi) ;;
+    *) die "IPXE_EFI_BINARY must be snponly.efi or ipxe.efi" ;;
+  esac
+  : "${SSH_PUBLIC_KEY_FILE:?set SSH_PUBLIC_KEY_FILE in .env}"
+  : "${DEBIAN_NETBOOT_URL:?set DEBIAN_NETBOOT_URL in .env}"
+  : "${ALPINE_NETBOOT_URL:?set ALPINE_NETBOOT_URL in .env}"
+  : "${ALPINE_REPO_URL:?set ALPINE_REPO_URL in .env}"
+  : "${UBUNTU_NETBOOT_URL:?set UBUNTU_NETBOOT_URL in .env}"
+  : "${UBUNTU_ISO_URL:?set UBUNTU_ISO_URL in .env}"
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}

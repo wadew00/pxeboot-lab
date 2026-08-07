@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+load_env
+require_command curl
+
+mkdir -p "${ROOT_DIR}/tftp"
+
+fetch() {
+  local url="$1"
+  local destination="$2"
+  local temporary="${destination}.part"
+  mkdir -p "$(dirname "${destination}")"
+  printf 'fetch %s\n' "${url}"
+  curl --fail --location --retry 3 --output "${temporary}" "${url}"
+  mv "${temporary}" "${destination}"
+}
+
+fetch_ipxe() {
+  fetch "https://boot.ipxe.org/x86_64-efi/${IPXE_EFI_BINARY}" "${ROOT_DIR}/tftp/${IPXE_EFI_BINARY}"
+}
+
+[[ "$#" -gt 0 ]] || die "usage: $0 ipxe"
+for target in "$@"; do
+  case "${target}" in
+    ipxe) fetch_ipxe ;;
+    *) die "only the first-stage iPXE binaries are local; usage: $0 ipxe" ;;
+  esac
+done

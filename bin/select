@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+
+target="${1:-}"
+case "${target}" in
+  local|debian|ubuntu|alpine|menu) ;;
+  *) die "usage: $0 local|debian|ubuntu|alpine|menu" ;;
+esac
+
+mkdir -p "${ROOT_DIR}/www"
+temporary="${ROOT_DIR}/www/selected.ipxe.tmp.$$"
+printf '#!ipxe\nchain --replace targets/%s.ipxe\n' "${target}" > "${temporary}"
+mv "${temporary}" "${ROOT_DIR}/www/selected.ipxe"
+printf 'next PXE target: %s\n' "${target}"
+

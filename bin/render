@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+load_env
+require_command awk
+require_command sed
+require_command tar
+
+key="$(awk 'NF >= 2 { print $1, $2; exit }' "${SSH_PUBLIC_KEY_FILE}")"
+[[ "${key}" == ssh-*\ * || "${key}" == ecdsa-*\ * ]] || die "invalid SSH public key: ${SSH_PUBLIC_KEY_FILE}"
+
+mkdir -p "${ROOT_DIR}/build" "${ROOT_DIR}/www/cloud-init" "${ROOT_DIR}/www/assets/alpine"
+mkdir -p "${ROOT_DIR}/www/targets"
+printf '%s\n' "${key}" > "${ROOT_DIR}/www/authorized_keys"
+
+sed \
+  -e "s|@@ROOT_DIR@@|${ROOT_DIR}|g" \
+  -e "s|@@PXE_INTERFACE@@|${PXE_INTERFACE}|g" \
+  -e "s|@@PXE_SERVER_IP@@|${PXE_SERVER_IP}|g" \
+  -e "s|@@PXE_DHCP_START@@|${PXE_DHCP_START}|g" \
+  -e "s|@@PXE_DHCP_END@@|${PXE_DHCP_END}|g" \
+  -e "s|@@PXE_NETMASK@@|${PXE_NETMASK}|g" \
+  -e "s|@@PXE_LEASE@@|${PXE_LEASE}|g" \
+  -e "s|@@PXE_HTTP_PORT@@|${PXE_HTTP_PORT}|g" \
+  -e "s|@@IPXE_EFI_BINARY@@|${IPXE_EFI_BINARY}|g" \
+  "${ROOT_DIR}/config/dnsmasq.conf.in" > "${ROOT_DIR}/build/dnsmasq.conf"
+
+sed \
+  -e "s|@@PXE_SERVER_IP@@|${PXE_SERVER_IP}|g" \
+  -e "s|@@PXE_HTTP_PORT@@|${PXE_HTTP_PORT}|g" \
+  "${ROOT_DIR}/config/preseed.cfg.in" > "${ROOT_DIR}/www/preseed.cfg"
+
+awk -v key="${key}" '{
+  if ($0 == "@@SSH_PUBLIC_KEY@@") print "  - " key
+  else print
+}' "${ROOT_DIR}/config/ubuntu-user-data.in" > "${ROOT_DIR}/www/cloud-init/user-data"
+: > "${ROOT_DIR}/www/cloud-init/meta-data"
+
+for source in "${ROOT_DIR}"/config/ipxe/*.ipxe.in; do
+  destination="${ROOT_DIR}/www/$(basename "${source}" .in)"
+  sed \
+    -e "s|@@PXE_HTTP_PORT@@|${PXE_HTTP_PORT}|g" \
+    -e "s|@@DEBIAN_NETBOOT_URL@@|${DEBIAN_NETBOOT_URL}|g" \
+    -e "s|@@ALPINE_NETBOOT_URL@@|${ALPINE_NETBOOT_URL}|g" \
+    -e "s|@@ALPINE_REPO_URL@@|${ALPINE_REPO_URL}|g" \
+    -e "s|@@UBUNTU_NETBOOT_URL@@|${UBUNTU_NETBOOT_URL}|g" \
+    -e "s|@@UBUNTU_ISO_URL@@|${UBUNTU_ISO_URL}|g" \
+    "${source}" > "${destination}"
+done
+for source in "${ROOT_DIR}"/config/ipxe/targets/*.ipxe.in; do
+  destination="${ROOT_DIR}/www/targets/$(basename "${source}" .in)"
+  sed \
+    -e "s|@@PXE_HTTP_PORT@@|${PXE_HTTP_PORT}|g" \
+    -e "s|@@DEBIAN_NETBOOT_URL@@|${DEBIAN_NETBOOT_URL}|g" \
+    -e "s|@@ALPINE_NETBOOT_URL@@|${ALPINE_NETBOOT_URL}|g" \
+    -e "s|@@ALPINE_REPO_URL@@|${ALPINE_REPO_URL}|g" \
+    -e "s|@@UBUNTU_NETBOOT_URL@@|${UBUNTU_NETBOOT_URL}|g" \
+    -e "s|@@UBUNTU_ISO_URL@@|${UBUNTU_ISO_URL}|g" \
+    "${source}" > "${destination}"
+done
+
+overlay="$(mktemp -d "${TMPDIR:-/tmp}/pxe-alpine.XXXXXX")"
+cleanup_overlay() { rm -rf "${overlay}"; }
+trap cleanup_overlay EXIT
+mkdir -p "${overlay}/etc/ssh" "${overlay}/root/.ssh" "${overlay}/etc/runlevels/default"
+printf '%s\n' "${key}" > "${overlay}/root/.ssh/authorized_keys"
+chmod 700 "${overlay}/root/.ssh"
+chmod 600 "${overlay}/root/.ssh/authorized_keys"
+cp "${ROOT_DIR}/config/alpine-sshd_config" "${overlay}/etc/ssh/sshd_config"
+ln -s /etc/init.d/sshd "${overlay}/etc/runlevels/default/sshd"
+tar -C "${overlay}" -czf "${ROOT_DIR}/www/assets/alpine/headless.apkovl.tar.gz" .
+cleanup_overlay
+trap - EXIT
+
+if [[ ! -s "${ROOT_DIR}/www/selected.ipxe" ]]; then
+  "${ROOT_DIR}/bin/select" local
+fi
+
+printf 'rendered configuration for %s:%s on %s\n' "${PXE_SERVER_IP}" "${PXE_HTTP_PORT}" "${PXE_INTERFACE}"

@@ -1,0 +1,5 @@
+#!ipxe
+set base http://${next-server}:@@PXE_HTTP_PORT@@
+kernel @@DEBIAN_NETBOOT_URL@@/linux auto=true priority=critical interface=auto netcfg/disable_autoconfig=false url=${base}/preseed.cfg ---
+initrd @@DEBIAN_NETBOOT_URL@@/initrd.gz
+boot

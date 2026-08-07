@@ -1,0 +1,5 @@
+#!ipxe
+set base http://${next-server}:@@PXE_HTTP_PORT@@
+kernel @@UBUNTU_NETBOOT_URL@@/linux ip=dhcp url=@@UBUNTU_ISO_URL@@ ds=nocloud-net;s=${base}/cloud-init/ ---
+initrd @@UBUNTU_NETBOOT_URL@@/initrd
+boot

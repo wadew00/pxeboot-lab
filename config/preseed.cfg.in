@@ -1,0 +1,15 @@
+# Debian Installer stops at network-console and waits for an SSH connection.
+d-i debian-installer/locale string en_US.UTF-8
+d-i keyboard-configuration/xkb-keymap select us
+d-i netcfg/choose_interface select auto
+d-i netcfg/get_hostname string debian
+d-i netcfg/get_domain string lab
+d-i mirror/country string manual
+d-i mirror/http/hostname string deb.debian.org
+d-i mirror/http/directory string /debian
+d-i mirror/http/proxy string
+d-i anna/choose_modules string network-console
+d-i preseed/early_command string anna-install network-console
+d-i network-console/password-disabled boolean true
+d-i network-console/authorized_keys_url string http://@@PXE_SERVER_IP@@:@@PXE_HTTP_PORT@@/authorized_keys
+

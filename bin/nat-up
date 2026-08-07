@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+load_env
+require_command pfctl
+require_command sysctl
+require_command awk
+
+[[ "${PXE_INTERFACE}" != "${PXE_UPLINK_INTERFACE}" ]] || die "PXE and uplink interfaces must be different"
+ifconfig "${PXE_INTERFACE}" >/dev/null 2>&1 || die "interface not found: ${PXE_INTERFACE}"
+ifconfig "${PXE_UPLINK_INTERFACE}" >/dev/null 2>&1 || die "interface not found: ${PXE_UPLINK_INTERFACE}"
+
+mkdir -p "${ROOT_DIR}/.run"
+token_file="${ROOT_DIR}/.run/pf-token"
+[[ ! -s "${token_file}" ]] || die "NAT already enabled by this lab; run ./bin/nat-down first"
+forwarding_before="$(sysctl -n net.inet.ip.forwarding)"
+printf '%s\n' "${forwarding_before}" > "${ROOT_DIR}/.run/ip-forwarding.before"
+
+rules="nat on ${PXE_UPLINK_INTERFACE} inet from ${PXE_SUBNET} to any -> (${PXE_UPLINK_INTERFACE})
+pass in quick on ${PXE_INTERFACE} inet from ${PXE_SUBNET} to any keep state
+pass out quick on ${PXE_UPLINK_INTERFACE} inet from ${PXE_SUBNET} to any keep state"
+
+printf '%s\n' "${rules}" | sudo pfctl -a com.apple/pxe-lab -f -
+pf_token="$(sudo pfctl -E 2>/dev/null | awk '/Token/ { print $3; exit }')"
+[[ -n "${pf_token}" ]] || die "PF was loaded but no enable-reference token was returned"
+printf '%s\n' "${pf_token}" > "${token_file}"
+sudo sysctl -w net.inet.ip.forwarding=1 >/dev/null
+printf 'NAT enabled: %s -> %s\n' "${PXE_SUBNET}" "${PXE_UPLINK_INTERFACE}"

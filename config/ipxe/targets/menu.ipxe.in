@@ -1,0 +1,24 @@
+#!ipxe
+menu Headless provisioning lab (operator console fallback)
+item --gap -- ---------------- safe ----------------
+item local Continue to local disk
+item --gap -- -------------- installers --------------
+item debian Debian stable - SSH installer
+item ubuntu Ubuntu Server - SSH installer
+item alpine Alpine latest stable - SSH shell
+item shell iPXE shell
+choose --default local --timeout 10000 target || goto local
+goto ${target}
+
+:local
+chain --replace local.ipxe
+:debian
+chain --replace debian.ipxe
+:ubuntu
+chain --replace ubuntu.ipxe
+:alpine
+chain --replace alpine.ipxe
+:shell
+shell
+goto local
+

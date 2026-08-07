@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+
+lease_file="${ROOT_DIR}/.run/dnsmasq.leases"
+if [[ -s "${lease_file}" ]]; then
+  awk '{ printf "%-15s  %-17s  %s\n", $3, $2, $4 }' "${lease_file}"
+else
+  printf 'no DHCP leases yet (%s)\n' "${lease_file}"
+fi
+
