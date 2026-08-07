@@ -74,6 +74,9 @@ awk -v key="${key}" '{
   else print
 }' "${ROOT_DIR}/config/arch-user-data.in" > "${ROOT_DIR}/www/cloud-init/arch/user-data"
 printf 'instance-id: archiso-pxe\nlocal-hostname: archiso\n' > "${ROOT_DIR}/www/cloud-init/arch/meta-data"
+printf '#cloud-config\n{}\n' > "${ROOT_DIR}/www/cloud-init/arch/vendor-data"
+sed "s|@@PXE_CLIENT_MAC@@|${PXE_CLIENT_MAC}|g" \
+  "${ROOT_DIR}/config/arch-network-config.in" > "${ROOT_DIR}/www/cloud-init/arch/network-config"
 
 awk -v key="${key}" '{
   if ($0 == "@@FEDORA_SSH_ACCESS@@") print "sshpw --username=root --sshkey \"" key "\""

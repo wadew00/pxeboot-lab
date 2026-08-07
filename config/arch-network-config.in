@@ -1,0 +1,6 @@
+version: 2
+ethernets:
+  pxe:
+    match:
+      macaddress: "@@PXE_CLIENT_MAC@@"
+    dhcp4: true
