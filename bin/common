@@ -28,6 +28,10 @@ load_env() {
     snponly.efi|ipxe.efi) ;;
     *) die "IPXE_EFI_BINARY must be snponly.efi or ipxe.efi" ;;
   esac
+  PXE_SERVICE_USER="${PXE_SERVICE_USER:-$(id -un)}"
+  PXE_SERVICE_GROUP="${PXE_SERVICE_GROUP:-$(id -gn)}"
+  [[ "${PXE_SERVICE_USER}" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid PXE_SERVICE_USER"
+  [[ "${PXE_SERVICE_GROUP}" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid PXE_SERVICE_GROUP"
   : "${SSH_PUBLIC_KEY_FILE:?set SSH_PUBLIC_KEY_FILE in .env}"
   : "${DEBIAN_NETBOOT_URL:?set DEBIAN_NETBOOT_URL in .env}"
   : "${ALPINE_NETBOOT_URL:?set ALPINE_NETBOOT_URL in .env}"

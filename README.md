@@ -131,6 +131,7 @@ The UEFI firmware downloads iPXE over TFTP. The second DHCP exchange identifies 
 ## Security and operational notes
 
 - Installer SSH accepts only the public key configured by `SSH_PUBLIC_KEY_FILE`; no private key is copied.
+- dnsmasq opens its privileged sockets as root, then drops to the invoking Mac user by default so it can read the project-local TFTP root. `PXE_SERVICE_USER` and `PXE_SERVICE_GROUP` can override this for a dedicated account.
 - The HTTP and TFTP services are intentionally plain text and belong only on an isolated provisioning network.
 - `local` is the default and must remain the idle state.
 - Verify the client disk before confirming any partitioning screen.

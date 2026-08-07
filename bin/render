@@ -40,6 +40,8 @@ sed \
   -e "s|@@PXE_LEASE@@|${PXE_LEASE}|g" \
   -e "s|@@PXE_HTTP_PORT@@|${PXE_HTTP_PORT}|g" \
   -e "s|@@IPXE_EFI_BINARY@@|${IPXE_EFI_BINARY}|g" \
+  -e "s|@@PXE_SERVICE_USER@@|${PXE_SERVICE_USER}|g" \
+  -e "s|@@PXE_SERVICE_GROUP@@|${PXE_SERVICE_GROUP}|g" \
   "${ROOT_DIR}/config/dnsmasq.conf.in" > "${ROOT_DIR}/build/dnsmasq.conf"
 
 sed \
