@@ -9,7 +9,8 @@ require_command tar
 key="$(awk 'NF >= 2 { print $1, $2; exit }' "${SSH_PUBLIC_KEY_FILE}")"
 [[ "${key}" == ssh-*\ * || "${key}" == ecdsa-*\ * ]] || die "invalid SSH public key: ${SSH_PUBLIC_KEY_FILE}"
 
-mkdir -p "${ROOT_DIR}/build" "${ROOT_DIR}/www/cloud-init" "${ROOT_DIR}/www/assets/alpine"
+mkdir -p "${ROOT_DIR}/build" "${ROOT_DIR}/www/cloud-init" "${ROOT_DIR}/www/cloud-init/arch"
+mkdir -p "${ROOT_DIR}/www/assets/alpine"
 mkdir -p "${ROOT_DIR}/www/targets"
 printf '%s\n' "${key}" > "${ROOT_DIR}/www/authorized_keys"
 
@@ -36,6 +37,17 @@ awk -v key="${key}" '{
 }' "${ROOT_DIR}/config/ubuntu-user-data.in" > "${ROOT_DIR}/www/cloud-init/user-data"
 : > "${ROOT_DIR}/www/cloud-init/meta-data"
 
+awk -v key="${key}" '{
+  if ($0 == "@@SSH_PUBLIC_KEY@@") print "      - " key
+  else print
+}' "${ROOT_DIR}/config/arch-user-data.in" > "${ROOT_DIR}/www/cloud-init/arch/user-data"
+printf 'instance-id: archiso-pxe\nlocal-hostname: archiso\n' > "${ROOT_DIR}/www/cloud-init/arch/meta-data"
+
+awk -v key="${key}" '{
+  if ($0 == "@@FEDORA_SSH_ACCESS@@") print "sshpw --username=root --sshkey \"" key "\""
+  else print
+}' "${ROOT_DIR}/config/fedora.ks.in" > "${ROOT_DIR}/www/fedora.ks"
+
 for source in "${ROOT_DIR}"/config/ipxe/*.ipxe.in; do
   destination="${ROOT_DIR}/www/$(basename "${source}" .in)"
   sed \
@@ -45,6 +57,8 @@ for source in "${ROOT_DIR}"/config/ipxe/*.ipxe.in; do
     -e "s|@@ALPINE_REPO_URL@@|${ALPINE_REPO_URL}|g" \
     -e "s|@@UBUNTU_NETBOOT_URL@@|${UBUNTU_NETBOOT_URL}|g" \
     -e "s|@@UBUNTU_ISO_URL@@|${UBUNTU_ISO_URL}|g" \
+    -e "s|@@FEDORA_TREE_URL@@|${FEDORA_TREE_URL}|g" \
+    -e "s|@@ARCHISO_URL@@|${ARCHISO_URL}|g" \
     "${source}" > "${destination}"
 done
 for source in "${ROOT_DIR}"/config/ipxe/targets/*.ipxe.in; do
@@ -56,6 +70,8 @@ for source in "${ROOT_DIR}"/config/ipxe/targets/*.ipxe.in; do
     -e "s|@@ALPINE_REPO_URL@@|${ALPINE_REPO_URL}|g" \
     -e "s|@@UBUNTU_NETBOOT_URL@@|${UBUNTU_NETBOOT_URL}|g" \
     -e "s|@@UBUNTU_ISO_URL@@|${UBUNTU_ISO_URL}|g" \
+    -e "s|@@FEDORA_TREE_URL@@|${FEDORA_TREE_URL}|g" \
+    -e "s|@@ARCHISO_URL@@|${ARCHISO_URL}|g" \
     "${source}" > "${destination}"
 done
 

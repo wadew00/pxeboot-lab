@@ -1,0 +1,3 @@
+# This partial Kickstart exists only to authorize the temporary installer SSH
+# account. It intentionally contains no storage or installation commands.
+@@FEDORA_SSH_ACCESS@@

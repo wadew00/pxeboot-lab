@@ -8,6 +8,8 @@ www/authorized_keys
 www/boot.ipxe
 www/cloud-init/meta-data
 www/cloud-init/user-data
+www/cloud-init/arch/
+www/fedora.ks
 www/preseed.cfg
 www/selected.ipxe
 www/targets/

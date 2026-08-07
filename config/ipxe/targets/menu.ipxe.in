@@ -5,6 +5,8 @@ item local Continue to local disk
 item --gap -- -------------- installers --------------
 item debian Debian stable - SSH installer
 item ubuntu Ubuntu Server - SSH installer
+item fedora Fedora Server - SSH maintenance shell
+item arch Arch Linux - SSH installer shell
 item alpine Alpine latest stable - SSH shell
 item shell iPXE shell
 choose --default local --timeout 10000 target || goto local
@@ -16,9 +18,12 @@ chain --replace local.ipxe
 chain --replace debian.ipxe
 :ubuntu
 chain --replace ubuntu.ipxe
+:fedora
+chain --replace fedora.ipxe
+:arch
+chain --replace arch.ipxe
 :alpine
 chain --replace alpine.ipxe
 :shell
 shell
 goto local
-

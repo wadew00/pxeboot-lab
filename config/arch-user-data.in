@@ -1,0 +1,10 @@
+#cloud-config
+disable_root: false
+users:
+  - name: root
+    lock_passwd: true
+    ssh_authorized_keys:
+@@SSH_PUBLIC_KEY@@
+ssh_pwauth: false
+runcmd:
+  - systemctl restart sshd.service

@@ -34,6 +34,8 @@ load_env() {
   : "${ALPINE_REPO_URL:?set ALPINE_REPO_URL in .env}"
   : "${UBUNTU_NETBOOT_URL:?set UBUNTU_NETBOOT_URL in .env}"
   : "${UBUNTU_ISO_URL:?set UBUNTU_ISO_URL in .env}"
+  : "${FEDORA_TREE_URL:?set FEDORA_TREE_URL in .env}"
+  : "${ARCHISO_URL:?set ARCHISO_URL in .env}"
 }
 
 require_command() {

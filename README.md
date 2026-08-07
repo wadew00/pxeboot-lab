@@ -9,10 +9,12 @@ Supported boot targets:
 | `local` | none | Safe default; exits PXE and continues the firmware boot order |
 | `debian` | `ssh installer@CLIENT_IP` | Debian Installer `network-console`; fully interactive over SSH |
 | `ubuntu` | `ssh installer@CLIENT_IP` | Subiquity live installer; SSH key is injected with NoCloud |
+| `fedora` | `ssh root@CLIENT_IP` | Anaconda maintenance/monitoring shell; see Fedora limitation below |
+| `arch` | `ssh root@CLIENT_IP` | Archiso installer shell; run `archinstall` or install manually |
 | `alpine` | `ssh root@CLIENT_IP` | Headless live environment; run `setup-alpine` after login |
 | `menu` | local keyboard/display | Optional iPXE menu for diagnostics only |
 
-No target in this starter configuration performs an unattended disk write. Installation remains interactive over SSH.
+No target in this starter configuration performs an unattended disk write. Debian, Ubuntu, Arch, and Alpine remain operator-driven over SSH; Fedora provides SSH maintenance access but needs a separate reviewed Kickstart for headless installation.
 
 ## Network layout
 
@@ -39,7 +41,11 @@ $EDITOR .env
 ./bin/render
 ```
 
-Only the EFI iPXE chainloader is downloaded to the Mac. Debian and Alpine fetch their kernel/initrd directly from their official CDN. Ubuntu fetches its kernel, initrd, and live-server ISO directly from Canonical. The vendor URLs are configurable in `.env`.
+Only the EFI iPXE chainloader is downloaded to the Mac. Debian, Fedora, Arch, and Alpine fetch their boot payloads directly from their official CDN. Ubuntu fetches its kernel, initrd, and live-server ISO directly from Canonical. The vendor URLs are configurable in `.env`.
+
+### Why Ubuntu still needs an ISO
+
+Ubuntu's netboot `linux` and `initrd` only bootstrap the live-server environment. During boot, the initrd downloads the URL passed with `url=`, loop-mounts that ISO, and uses its live filesystem as the Subiquity installer runtime. The ISO is therefore required by Ubuntu's installer design, but it is downloaded by the HP directly from Canonical and is never stored on the Mac.
 
 Assign the configured address to the isolated adapter (this changes host networking and needs administrator privileges):
 
@@ -74,7 +80,19 @@ After the machine has fetched the selected target, immediately return the server
 ./bin/select local
 ```
 
-`./bin/leases` prints the address assigned by `dnsmasq`. For Ubuntu use the same `installer` username; for Alpine use `root`.
+`./bin/leases` prints the address assigned by `dnsmasq`. SSH usernames and entry commands are:
+
+```text
+Debian: ssh installer@CLIENT_IP
+Ubuntu: ssh installer@CLIENT_IP
+Fedora: ssh root@CLIENT_IP
+Arch:   ssh root@CLIENT_IP       then run archinstall
+Alpine: ssh root@CLIENT_IP       then run setup-alpine
+```
+
+### Fedora limitation
+
+Anaconda's `inst.sshd` mode officially exposes SSH for monitoring and debugging; it does not transport the current installer UI over SSH. The included partial Kickstart authorizes the temporary root account but deliberately contains no disk or installation commands. A truly headless Fedora installation therefore needs either a reviewed full Kickstart profile or Anaconda's remote graphical mode. Do not mistake the Fedora SSH shell for an interactive Anaconda TUI.
 
 ## HP EliteDesk firmware settings
 
