@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  pxeboot up [target]       Start the complete lab (default target: local)
+  pxeboot down              Safely stop the complete lab
+  pxeboot restart [target]  Restart the lab
+  pxeboot select TARGET     Change the next boot target
+  pxeboot TARGET            Shortcut for: pxeboot up TARGET
+  pxeboot status            Show services, selection, and client leases
+  pxeboot leases            Show DHCP leases
+  pxeboot ssh [IP]          SSH to the most recent installer client
+  pxeboot rdp [IP]          Show Fedora RDP endpoint and credentials
+  pxeboot logs              Follow HTTP and dnsmasq logs
+  pxeboot doctor            Run configuration checks
+  pxeboot render            Regenerate runtime files
+
+Targets: local, debian, ubuntu, fedora, arch, alpine, menu
+EOF
+}
+
+is_target() {
+  case "$1" in
+    local|debian|ubuntu|fedora|arch|alpine|menu) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+selected_target() {
+  local selected_file="${ROOT_DIR}/www/selected.ipxe"
+  [[ -r "${selected_file}" ]] || return 1
+  sed -n 's|.*targets/\([^.]*\)\.ipxe.*|\1|p' "${selected_file}" | head -n 1
+}
+
+recent_target() {
+  local selected
+  selected="$(selected_target || true)"
+  if [[ -n "${selected}" && "${selected}" != local && "${selected}" != menu ]]; then
+    printf '%s\n' "${selected}"
+  elif [[ -r "${ROOT_DIR}/.run/last-target" ]]; then
+    head -n 1 "${ROOT_DIR}/.run/last-target"
+  else
+    return 1
+  fi
+}
+
+recent_client_ip() {
+  local lease_file="${ROOT_DIR}/.run/dnsmasq.leases"
+  [[ -r "${lease_file}" ]] || return 1
+  awk 'NF >= 3 { ip=$3 } END { if (ip) print ip }' "${lease_file}"
+}
+
+pid_state() {
+  local pid_file="$1"
+  local pattern="$2"
+  if [[ ! -s "${pid_file}" ]]; then
+    printf 'down'
+    return
+  fi
+  local pid command
+  pid="$(<"${pid_file}")"
+  command="$(ps -p "${pid}" -o command= 2>/dev/null || true)"
+  if [[ "${command}" == *"${pattern}"* ]]; then
+    printf 'up (pid %s)' "${pid}"
+  else
+    printf 'down (stale pid %s)' "${pid}"
+  fi
+}
+
+lab_up() {
+  local target="${1:-local}"
+  local interface_was_up=false nat_was_up=false previous_target
+  is_target "${target}" || die "unknown target: ${target}"
+  load_env
+  if [[ ! -s "${ROOT_DIR}/tftp/${IPXE_EFI_BINARY}" ]]; then
+    printf 'Missing UEFI chainloader; downloading %s from iPXE...\n' "${IPXE_EFI_BINARY}"
+    "${ROOT_DIR}/bin/fetch-assets" ipxe
+  fi
+  "${ROOT_DIR}/bin/render"
+  previous_target="$(selected_target || printf 'local')"
+  "${ROOT_DIR}/bin/select" "${target}"
+
+  if ifconfig "${PXE_INTERFACE}" 2>/dev/null | grep -Fq "inet ${PXE_SERVER_IP} "; then
+    interface_was_up=true
+  fi
+  if ! "${ROOT_DIR}/bin/interface-up"; then
+    "${ROOT_DIR}/bin/select" "${previous_target}" || true
+    die "interface startup failed; target selection was rolled back"
+  fi
+  [[ ! -s "${ROOT_DIR}/.run/pf-token" ]] || nat_was_up=true
+  if ! "${ROOT_DIR}/bin/nat-up"; then
+    "${ROOT_DIR}/bin/nat-down" || true
+    [[ "${interface_was_up}" == true ]] || "${ROOT_DIR}/bin/interface-down" || true
+    "${ROOT_DIR}/bin/select" "${previous_target}" || true
+    die "NAT startup failed; interface change was rolled back"
+  fi
+  if ! "${ROOT_DIR}/bin/services-up"; then
+    [[ "${nat_was_up}" == true ]] || "${ROOT_DIR}/bin/nat-down" || true
+    [[ "${interface_was_up}" == true ]] || "${ROOT_DIR}/bin/interface-down" || true
+    "${ROOT_DIR}/bin/select" "${previous_target}" || true
+    die "service startup failed; network changes were rolled back"
+  fi
+  printf '\nPXE lab is ready. Boot the HP using UEFI Network IPv4.\n'
+  printf 'Watch clients: %s status\n' "$0"
+  case "${target}" in
+    fedora) printf 'After DHCP: %s rdp\n' "$0" ;;
+    debian|ubuntu|arch|alpine) printf 'After DHCP: %s ssh\n' "$0" ;;
+  esac
+}
+
+lab_down() {
+  load_env
+  "${ROOT_DIR}/bin/select" local
+  "${ROOT_DIR}/bin/services-down"
+  "${ROOT_DIR}/bin/nat-down"
+  "${ROOT_DIR}/bin/interface-down"
+  printf 'PXE lab is down; next boot target is local.\n'
+}
+
+show_status() {
+  load_env
+  local interface_state=down nat_state=down target=unknown
+  if ifconfig "${PXE_INTERFACE}" 2>/dev/null | grep -Fq "inet ${PXE_SERVER_IP} "; then
+    interface_state="up (${PXE_INTERFACE} ${PXE_SERVER_IP})"
+  fi
+  [[ -s "${ROOT_DIR}/.run/pf-token" ]] && nat_state=up
+  target="$(selected_target || printf 'unknown')"
+  printf 'target    %s\n' "${target}"
+  printf 'interface %s\n' "${interface_state}"
+  printf 'NAT       %s\n' "${nat_state}"
+  printf 'HTTP      %s\n' "$(pid_state "${ROOT_DIR}/.run/http.pid" "--directory ${ROOT_DIR}/www")"
+  printf 'dnsmasq   %s\n' "$(pid_state "${ROOT_DIR}/.run/dnsmasq.pid" "--conf-file=${ROOT_DIR}/build/dnsmasq.conf")"
+  printf '\nLeases:\n'
+  "${ROOT_DIR}/bin/leases"
+}
+
+installer_ssh() {
+  load_env
+  local ip="${1:-}" target user
+  [[ -n "${ip}" ]] || ip="$(recent_client_ip || true)"
+  [[ -n "${ip}" ]] || die "no client IP; boot a target or pass an IP"
+  target="$(recent_target || true)"
+  case "${target}" in
+    debian|ubuntu) user=installer ;;
+    fedora|arch|alpine) user=root ;;
+    *) die "cannot determine installer SSH user; use ssh user@${ip}" ;;
+  esac
+  exec ssh "${user}@${ip}"
+}
+
+fedora_rdp() {
+  load_env
+  local ip="${1:-}"
+  [[ -n "${ip}" ]] || ip="$(recent_client_ip || true)"
+  [[ -n "${ip}" ]] || die "no client IP; boot Fedora or pass an IP"
+  "${ROOT_DIR}/bin/fedora-credentials"
+  printf 'Fedora installer RDP endpoint: %s:3389\n' "${ip}"
+}
+
+command_name="${1:-help}"
+shift || true
+
+if is_target "${command_name}"; then
+  [[ "$#" -eq 0 ]] || die "target shortcut accepts no extra arguments"
+  lab_up "${command_name}"
+  exit
+fi
+
+case "${command_name}" in
+  up|start)
+    [[ "$#" -le 1 ]] || die "usage: pxeboot up [target]"
+    lab_up "${1:-local}"
+    ;;
+  down|stop)
+    [[ "$#" -eq 0 ]] || die "usage: pxeboot down"
+    lab_down
+    ;;
+  restart)
+    [[ "$#" -le 1 ]] || die "usage: pxeboot restart [target]"
+    restart_target="${1:-$(selected_target || printf 'local')}"
+    lab_down
+    lab_up "${restart_target}"
+    ;;
+  select)
+    [[ "$#" -eq 1 ]] || die "usage: pxeboot select TARGET"
+    "${ROOT_DIR}/bin/select" "$1"
+    ;;
+  status)
+    [[ "$#" -eq 0 ]] || die "usage: pxeboot status"
+    show_status
+    ;;
+  leases)
+    [[ "$#" -eq 0 ]] || die "usage: pxeboot leases"
+    "${ROOT_DIR}/bin/leases"
+    ;;
+  ssh)
+    [[ "$#" -le 1 ]] || die "usage: pxeboot ssh [IP]"
+    installer_ssh "${1:-}"
+    ;;
+  rdp)
+    [[ "$#" -le 1 ]] || die "usage: pxeboot rdp [IP]"
+    fedora_rdp "${1:-}"
+    ;;
+  logs)
+    [[ "$#" -eq 0 ]] || die "usage: pxeboot logs"
+    mkdir -p "${ROOT_DIR}/.run"
+    touch "${ROOT_DIR}/.run/http.log" "${ROOT_DIR}/.run/dnsmasq.log"
+    exec tail -F "${ROOT_DIR}/.run/http.log" "${ROOT_DIR}/.run/dnsmasq.log"
+    ;;
+  doctor)
+    [[ "$#" -eq 0 ]] || die "usage: pxeboot doctor"
+    exec "${ROOT_DIR}/bin/doctor"
+    ;;
+  render)
+    [[ "$#" -eq 0 ]] || die "usage: pxeboot render"
+    exec "${ROOT_DIR}/bin/render"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    usage >&2
+    die "unknown command: ${command_name}"
+    ;;
+esac

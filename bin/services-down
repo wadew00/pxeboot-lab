@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+
+run_dir="${ROOT_DIR}/.run"
+http_pid_file="${run_dir}/http.pid"
+dnsmasq_pid_file="${run_dir}/dnsmasq.pid"
+http_only=false
+[[ "${1:-}" == --http-only ]] && http_only=true
+
+pid_command() {
+  local pid="$1"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+  ps -p "${pid}" -o command= 2>/dev/null
+}
+
+if [[ "${http_only}" == false ]] && [[ -s "${dnsmasq_pid_file}" ]]; then
+  dnsmasq_pid="$(<"${dnsmasq_pid_file}")"
+  dnsmasq_command="$(pid_command "${dnsmasq_pid}" || true)"
+  if [[ "${dnsmasq_command}" == *dnsmasq* && "${dnsmasq_command}" == *"--conf-file=${ROOT_DIR}/build/dnsmasq.conf"* ]]; then
+    sudo kill "${dnsmasq_pid}"
+    printf 'dnsmasq stopped (pid %s)\n' "${dnsmasq_pid}"
+  else
+    printf 'dnsmasq was not running (stale pid %s)\n' "${dnsmasq_pid}"
+  fi
+  rm -f "${dnsmasq_pid_file}"
+fi
+
+if [[ -s "${http_pid_file}" ]]; then
+  http_pid="$(<"${http_pid_file}")"
+  http_command="$(pid_command "${http_pid}" || true)"
+  if [[ "${http_command}" == *http.server* && "${http_command}" == *"${ROOT_DIR}/www"* ]]; then
+    kill "${http_pid}"
+    printf 'HTTP server stopped (pid %s)\n' "${http_pid}"
+  else
+    printf 'HTTP server was not running (stale pid %s)\n' "${http_pid}"
+  fi
+  rm -f "${http_pid_file}"
+fi

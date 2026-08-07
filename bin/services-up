@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+load_env
+require_command dnsmasq
+require_command nohup
+require_command python3
+
+run_dir="${ROOT_DIR}/.run"
+http_pid_file="${run_dir}/http.pid"
+dnsmasq_pid_file="${run_dir}/dnsmasq.pid"
+mkdir -p "${run_dir}"
+
+pid_matches() {
+  local pid="$1"
+  local pattern="$2"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+  ps -p "${pid}" -o command= 2>/dev/null | grep -Fq -- "${pattern}"
+}
+
+http_started=false
+http_pattern="--directory ${ROOT_DIR}/www"
+
+if [[ -s "${http_pid_file}" ]] && pid_matches "$(<"${http_pid_file}")" "${http_pattern}"; then
+  printf 'HTTP server already running (pid %s)\n' "$(<"${http_pid_file}")"
+else
+  : > "${run_dir}/http.log"
+  nohup python3 -m http.server "${PXE_HTTP_PORT}" \
+    --bind "${PXE_SERVER_IP}" \
+    --directory "${ROOT_DIR}/www" \
+    >> "${run_dir}/http.log" 2>&1 </dev/null &
+  http_pid=$!
+  printf '%s\n' "${http_pid}" > "${http_pid_file}"
+  sleep 0.2
+  if ! pid_matches "${http_pid}" "${http_pattern}"; then
+    kill "${http_pid}" >/dev/null 2>&1 || true
+    rm -f "${http_pid_file}"
+    die "HTTP server failed; inspect ${run_dir}/http.log"
+  fi
+  http_started=true
+  printf 'HTTP server started (pid %s)\n' "${http_pid}"
+fi
+
+dnsmasq_pattern="--conf-file=${ROOT_DIR}/build/dnsmasq.conf"
+if [[ -s "${dnsmasq_pid_file}" ]] && pid_matches "$(<"${dnsmasq_pid_file}")" "${dnsmasq_pattern}"; then
+  printf 'dnsmasq already running (pid %s)\n' "$(<"${dnsmasq_pid_file}")"
+else
+  : > "${run_dir}/dnsmasq.log"
+  if ! sudo dnsmasq --conf-file="${ROOT_DIR}/build/dnsmasq.conf"; then
+    [[ "${http_started}" == false ]] || "${ROOT_DIR}/bin/services-down" --http-only
+    die "dnsmasq failed; inspect ${run_dir}/dnsmasq.log"
+  fi
+  sleep 0.2
+  if [[ ! -s "${dnsmasq_pid_file}" ]] || ! pid_matches "$(<"${dnsmasq_pid_file}")" "${dnsmasq_pattern}"; then
+    [[ "${http_started}" == false ]] || "${ROOT_DIR}/bin/services-down" --http-only
+    die "dnsmasq did not stay running; inspect ${run_dir}/dnsmasq.log"
+  fi
+  printf 'dnsmasq started (pid %s)\n' "$(<"${dnsmasq_pid_file}")"
+fi

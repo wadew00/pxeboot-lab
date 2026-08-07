@@ -8,6 +8,8 @@ dhcp-range=@@PXE_DHCP_START@@,@@PXE_DHCP_END@@,@@PXE_NETMASK@@,@@PXE_LEASE@@
 dhcp-option=option:router,@@PXE_SERVER_IP@@
 dhcp-option=option:dns-server,1.1.1.1,9.9.9.9
 dhcp-leasefile=@@ROOT_DIR@@/.run/dnsmasq.leases
+pid-file=@@ROOT_DIR@@/.run/dnsmasq.pid
+log-facility=@@ROOT_DIR@@/.run/dnsmasq.log
 enable-tftp
 tftp-root=@@ROOT_DIR@@/tftp
 

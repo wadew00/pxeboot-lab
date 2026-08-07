@@ -13,7 +13,10 @@ ifconfig "${PXE_INTERFACE}" | grep -Fq "inet ${PXE_SERVER_IP} " || die "PXE addr
 
 mkdir -p "${ROOT_DIR}/.run"
 token_file="${ROOT_DIR}/.run/pf-token"
-[[ ! -s "${token_file}" ]] || die "NAT already enabled by this lab; run ./bin/nat-down first"
+if [[ -s "${token_file}" ]]; then
+  printf 'NAT already enabled for this lab\n'
+  exit 0
+fi
 forwarding_before="$(sysctl -n net.inet.ip.forwarding)"
 printf '%s\n' "${forwarding_before}" > "${ROOT_DIR}/.run/ip-forwarding.before"
 

@@ -5,9 +5,14 @@ load_env
 require_command pfctl
 require_command sysctl
 
-sudo pfctl -a com.apple/pxe-lab -F all >/dev/null
 state_file="${ROOT_DIR}/.run/ip-forwarding.before"
 token_file="${ROOT_DIR}/.run/pf-token"
+if [[ ! -s "${token_file}" ]] && [[ ! -s "${state_file}" ]]; then
+  printf 'PXE NAT is not enabled\n'
+  exit 0
+fi
+
+sudo pfctl -a com.apple/pxe-lab -F all >/dev/null
 if [[ -r "${state_file}" ]] && [[ "$(<"${state_file}")" == 0 ]]; then
   sudo sysctl -w net.inet.ip.forwarding=0 >/dev/null
 fi

@@ -12,4 +12,8 @@ mkdir -p "${ROOT_DIR}/www"
 temporary="${ROOT_DIR}/www/selected.ipxe.tmp.$$"
 printf '#!ipxe\nchain --replace targets/%s.ipxe\n' "${target}" > "${temporary}"
 mv "${temporary}" "${ROOT_DIR}/www/selected.ipxe"
+if [[ "${target}" != local && "${target}" != menu ]]; then
+  mkdir -p "${ROOT_DIR}/.run"
+  printf '%s\n' "${target}" > "${ROOT_DIR}/.run/last-target"
+fi
 printf 'next PXE target: %s\n' "${target}"
