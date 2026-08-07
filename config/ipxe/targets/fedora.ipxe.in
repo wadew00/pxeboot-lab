@@ -1,5 +1,5 @@
 #!ipxe
-set base http://${next-server}:@@PXE_HTTP_PORT@@
+set base @@PXE_BOOT_URL@@
 set fedora_tree @@FEDORA_TREE_URL@@
 kernel ${fedora_tree}/images/pxeboot/vmlinuz ip=dhcp inst.repo=${fedora_tree} inst.sshd inst.ks=${base}/fedora.ks inst.rdp inst.rdp.username=@@FEDORA_RDP_USERNAME@@ inst.rdp.password=@@FEDORA_RDP_PASSWORD@@
 initrd ${fedora_tree}/images/pxeboot/initrd.img

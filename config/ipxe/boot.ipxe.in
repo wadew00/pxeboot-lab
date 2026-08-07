@@ -1,15 +1,9 @@
 #!ipxe
 
-isset ${next-server} || goto no_server
-set base http://${next-server}:@@PXE_HTTP_PORT@@
+set base @@PXE_BOOT_URL@@
 chain ${base}/selected.ipxe || goto failed
 exit
-
-:no_server
-echo DHCP did not provide next-server; cannot find the provisioning host.
-shell
 
 :failed
 echo Selected target failed. Opening the iPXE shell.
 shell
-

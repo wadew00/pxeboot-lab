@@ -14,26 +14,52 @@ pid_command() {
   ps -p "${pid}" -o command= 2>/dev/null
 }
 
+wait_for_exit() {
+  local pid="$1" pattern="$2" attempt command
+  attempt=0
+  while (( attempt < 50 )); do
+    command="$(pid_command "${pid}" || true)"
+    [[ "${command}" != *"${pattern}"* ]] && return 0
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
+cleanup_failed=false
+
 if [[ "${http_only}" == false ]] && [[ -s "${dnsmasq_pid_file}" ]]; then
   dnsmasq_pid="$(<"${dnsmasq_pid_file}")"
   dnsmasq_command="$(pid_command "${dnsmasq_pid}" || true)"
   if [[ "${dnsmasq_command}" == *dnsmasq* && "${dnsmasq_command}" == *"--conf-file=${ROOT_DIR}/build/dnsmasq.conf"* ]]; then
-    sudo kill "${dnsmasq_pid}"
-    printf 'dnsmasq stopped (pid %s)\n' "${dnsmasq_pid}"
+    if sudo kill "${dnsmasq_pid}" && wait_for_exit "${dnsmasq_pid}" "--conf-file=${ROOT_DIR}/build/dnsmasq.conf"; then
+      printf 'dnsmasq stopped (pid %s)\n' "${dnsmasq_pid}"
+      rm -f "${dnsmasq_pid_file}"
+    else
+      printf 'error: dnsmasq did not stop (pid %s); ownership retained\n' "${dnsmasq_pid}" >&2
+      cleanup_failed=true
+    fi
   else
     printf 'dnsmasq was not running (stale pid %s)\n' "${dnsmasq_pid}"
+    rm -f "${dnsmasq_pid_file}"
   fi
-  rm -f "${dnsmasq_pid_file}"
 fi
 
 if [[ -s "${http_pid_file}" ]]; then
   http_pid="$(<"${http_pid_file}")"
   http_command="$(pid_command "${http_pid}" || true)"
   if [[ "${http_command}" == *http.server* && "${http_command}" == *"${ROOT_DIR}/www"* ]]; then
-    kill "${http_pid}"
-    printf 'HTTP server stopped (pid %s)\n' "${http_pid}"
+    if kill "${http_pid}" && wait_for_exit "${http_pid}" "${ROOT_DIR}/www"; then
+      printf 'HTTP server stopped (pid %s)\n' "${http_pid}"
+      rm -f "${http_pid_file}"
+    else
+      printf 'error: HTTP server did not stop (pid %s); ownership retained\n' "${http_pid}" >&2
+      cleanup_failed=true
+    fi
   else
     printf 'HTTP server was not running (stale pid %s)\n' "${http_pid}"
+    rm -f "${http_pid_file}"
   fi
-  rm -f "${http_pid_file}"
 fi
+
+[[ "${cleanup_failed}" == false ]]

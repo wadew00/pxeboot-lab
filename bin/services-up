@@ -2,9 +2,11 @@
 
 source "$(cd "$(dirname "$0")" && pwd)/common"
 load_env
-require_command dnsmasq
 require_command nohup
 require_command python3
+if [[ "${PXE_MODE}" != http ]]; then
+  require_command dnsmasq
+fi
 
 run_dir="${ROOT_DIR}/.run"
 http_pid_file="${run_dir}/http.pid"
@@ -52,24 +54,28 @@ else
   printf 'HTTP server started (pid %s)\n' "${http_pid}"
 fi
 
-dnsmasq_pattern="--conf-file=${ROOT_DIR}/build/dnsmasq.conf"
-if [[ -s "${dnsmasq_pid_file}" ]] && pid_matches "$(<"${dnsmasq_pid_file}")" "${dnsmasq_pattern}"; then
-  printf 'dnsmasq already running (pid %s)\n' "$(<"${dnsmasq_pid_file}")"
+if [[ "${PXE_MODE}" == http ]]; then
+  printf 'dnsmasq not required for %s\n' "${PXE_PROFILE}"
 else
-  rm -f "${dnsmasq_pid_file}" "${run_dir}/dnsmasq.log"
-  : > "${run_dir}/dnsmasq.log"
-  if ! sudo dnsmasq --conf-file="${ROOT_DIR}/build/dnsmasq.conf"; then
-    "${ROOT_DIR}/bin/services-down" || true
-    http_started=false
-    die "dnsmasq failed; inspect ${run_dir}/dnsmasq.log"
+  dnsmasq_pattern="--conf-file=${ROOT_DIR}/build/dnsmasq.conf"
+  if [[ -s "${dnsmasq_pid_file}" ]] && pid_matches "$(<"${dnsmasq_pid_file}")" "${dnsmasq_pattern}"; then
+    printf 'dnsmasq already running (pid %s)\n' "$(<"${dnsmasq_pid_file}")"
+  else
+    rm -f "${dnsmasq_pid_file}" "${run_dir}/dnsmasq.log"
+    : > "${run_dir}/dnsmasq.log"
+    if ! sudo dnsmasq --conf-file="${ROOT_DIR}/build/dnsmasq.conf"; then
+      "${ROOT_DIR}/bin/services-down" || true
+      http_started=false
+      die "dnsmasq failed; inspect ${run_dir}/dnsmasq.log"
+    fi
+    sleep 0.2
+    if [[ ! -s "${dnsmasq_pid_file}" ]] || ! pid_matches "$(<"${dnsmasq_pid_file}")" "${dnsmasq_pattern}"; then
+      "${ROOT_DIR}/bin/services-down" || true
+      http_started=false
+      die "dnsmasq did not stay running; inspect ${run_dir}/dnsmasq.log"
+    fi
+    printf 'dnsmasq started (pid %s)\n' "$(<"${dnsmasq_pid_file}")"
   fi
-  sleep 0.2
-  if [[ ! -s "${dnsmasq_pid_file}" ]] || ! pid_matches "$(<"${dnsmasq_pid_file}")" "${dnsmasq_pattern}"; then
-    "${ROOT_DIR}/bin/services-down" || true
-    http_started=false
-    die "dnsmasq did not stay running; inspect ${run_dir}/dnsmasq.log"
-  fi
-  printf 'dnsmasq started (pid %s)\n' "$(<"${dnsmasq_pid_file}")"
 fi
 
 trap - EXIT

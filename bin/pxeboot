@@ -11,12 +11,15 @@ Usage:
   pxeboot rescue            Start the headless Arch rescue environment
   pxeboot select TARGET     Change the next boot target
   pxeboot TARGET            Shortcut for: pxeboot up TARGET
-  pxeboot status            Show services, selection, and client leases
-  pxeboot leases            Show DHCP leases
+  pxeboot status            Show services, selection, and client address
+  pxeboot leases            Show client address or managed DHCP leases
   pxeboot ssh [IP]          SSH to the most recent installer client
   pxeboot rdp [IP]          Show Fedora RDP endpoint and credentials
   pxeboot logs              Follow HTTP and dnsmasq logs
   pxeboot doctor            Run configuration checks
+  pxeboot topology          Show the resolved topology without starting it
+  pxeboot profile ...       List, inspect, detect, or select topology profiles
+  pxeboot bootstrap         Generate the ESP autoexec.ipxe bootstrap
   pxeboot render            Regenerate runtime files
 
 Targets: local, debian, ubuntu, fedora, arch, alpine, menu
@@ -49,7 +52,12 @@ recent_target() {
 }
 
 recent_client_ip() {
-  if [[ "${PXE_MODE}" == proxy ]]; then
+  if [[ "${PXE_MODE}" != dedicated ]]; then
+    if [[ -n "${PXE_CLIENT_IP:-}" ]]; then
+      printf '%s\n' "${PXE_CLIENT_IP}"
+      return
+    fi
+    [[ -n "${PXE_CLIENT_MAC:-}" ]] || return 1
     arp -an | awk -v mac="${PXE_CLIENT_MAC}" '
       tolower($4) == tolower(mac) {
         gsub(/[()]/, "", $2)
@@ -87,19 +95,72 @@ interface_link_state() {
   printf '%s\n' "${state:-unknown}"
 }
 
+finish_lifecycle() {
+  release_lifecycle_lock
+  trap - EXIT INT TERM
+}
+
+managed_process_running() {
+  local pid_file="$1" pattern="$2" pid='' process=''
+  [[ -s "${pid_file}" ]] || return 1
+  pid="$(<"${pid_file}")"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+  process="$(ps -p "${pid}" -o command= 2>/dev/null || true)"
+  [[ "${process}" == *"${pattern}"* ]]
+}
+
+session_health_issue() {
+  if ! ifconfig "${PXE_INTERFACE}" 2>/dev/null | grep -Fq "inet ${PXE_SERVER_IP} "; then
+    printf '%s no longer has %s' "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
+    return
+  fi
+  if ! managed_process_running "${ROOT_DIR}/.run/http.pid" "--directory ${ROOT_DIR}/www"; then
+    printf 'HTTP service is not running'
+    return
+  fi
+  if [[ "${PXE_MODE}" != http ]] && \
+     ! managed_process_running "${ROOT_DIR}/.run/dnsmasq.pid" "--conf-file=${ROOT_DIR}/build/dnsmasq.conf"; then
+    printf 'dnsmasq is not running'
+    return
+  fi
+  if [[ "${PXE_MODE}" == dedicated ]] && [[ ! -s "${ROOT_DIR}/.run/pf-token" ]]; then
+    printf 'dedicated NAT state is missing'
+    return
+  fi
+  return 0
+}
+
 lab_up() {
   local target="${1:-local}"
+  local lock_held="${2:-false}"
   local active_mode_file="${ROOT_DIR}/.run/active-mode"
-  local interface_was_up=false nat_was_up=false previous_target
+  local health_issue='' interface_was_up=false nat_was_up=false previous_target
   is_target "${target}" || die "unknown target: ${target}"
+  [[ "${lock_held}" == true ]] || acquire_lifecycle_lock
+  if use_session_env; then
+    load_env
+    if [[ "$(sed -n '1p' "${SESSION_STATE_FILE}" 2>/dev/null || true)" != active ]]; then
+      die "an incomplete ${PXE_PROFILE} session exists; run pxeboot down first"
+    fi
+    health_issue="$(session_health_issue)"
+    [[ -z "${health_issue}" ]] || \
+      die "active session is unhealthy (${health_issue}); run pxeboot restart ${target}"
+    "${ROOT_DIR}/bin/select" "${target}"
+    printf 'PXE session already active; next target changed to %s.\n' "${target}"
+    [[ "${lock_held}" == true ]] || finish_lifecycle
+    return
+  fi
   load_env
-  if [[ -s "${active_mode_file}" ]] && [[ "$(<"${active_mode_file}")" != "${PXE_MODE}" ]]; then
-    die "a $(<"${active_mode_file}") session is still active; run pxeboot down before switching to ${PXE_MODE} mode"
-  fi
-  if [[ "${PXE_MODE}" == proxy ]] && [[ -s "${ROOT_DIR}/.run/pf-token" ]]; then
-    die "dedicated NAT state is still active; run pxeboot down before starting proxy mode"
-  fi
-  if [[ ! -s "${ROOT_DIR}/tftp/${IPXE_EFI_BINARY}" ]]; then
+  for stale_state in active-mode pf-token pf-enable-output interface-alias http.pid dnsmasq.pid; do
+    [[ ! -e "${ROOT_DIR}/.run/${stale_state}" ]] || \
+      die "stale pxeboot state exists (${stale_state}); run pxeboot down before starting"
+  done
+  write_session_env
+  use_session_env
+  load_env
+  printf 'starting\n' > "${SESSION_STATE_FILE}"
+  printf '%s\n' "${PXE_MODE}" > "${active_mode_file}"
+  if [[ "${PXE_MODE}" != http ]] && [[ ! -s "${ROOT_DIR}/tftp/${IPXE_EFI_BINARY}" ]]; then
     printf 'Missing UEFI chainloader; downloading %s from iPXE...\n' "${IPXE_EFI_BINARY}"
     "${ROOT_DIR}/bin/fetch-assets" ipxe
   fi
@@ -127,58 +188,76 @@ lab_up() {
     "${ROOT_DIR}/bin/select" "${previous_target}" || true
     die "service startup failed; network changes were rolled back"
   fi
-  printf '%s\n' "${PXE_MODE}" > "${active_mode_file}"
+  printf 'active\n' > "${SESSION_STATE_FILE}"
   link_state="$(interface_link_state)"
-  if [[ "${PXE_MODE}" == proxy ]]; then
-    printf '\nPXE lab is ready on the router LAN. Boot the HP using its iPXE UEFI entry.\n'
-  else
-    printf '\nPXE lab is ready. Boot the HP using UEFI Network IPv4.\n'
-  fi
+  case "${PXE_MODE}" in
+    proxy) printf '\nPXE lab is ready on the router LAN. Boot the HP using its iPXE UEFI entry.\n' ;;
+    http) printf '\nHTTP boot service is ready. Boot the HP using the enrolled iPXE UEFI entry.\n' ;;
+    dedicated) printf '\nPXE lab is ready. Boot the HP using UEFI Network IPv4.\n' ;;
+  esac
   if [[ "${link_state}" != active ]]; then
-    printf 'WARNING: %s has no active Ethernet link (status: %s).\n' "${PXE_INTERFACE}" "${link_state}"
+    printf 'WARNING: %s has no active network link (status: %s).\n' "${PXE_INTERFACE}" "${link_state}"
   fi
   printf 'Watch clients: %s status\n' "$0"
   case "${target}" in
     fedora) printf 'After DHCP: %s rdp\n' "$0" ;;
     debian|ubuntu|arch|alpine) printf 'After DHCP: %s ssh\n' "$0" ;;
   esac
+  [[ "${lock_held}" == true ]] || finish_lifecycle
 }
 
 lab_down() {
+  local lock_held="${1:-false}"
+  local cleanup_failed=false
+  [[ "${lock_held}" == true ]] || acquire_lifecycle_lock
+  use_session_env || true
   load_env
-  "${ROOT_DIR}/bin/select" local
-  "${ROOT_DIR}/bin/services-down"
-  "${ROOT_DIR}/bin/nat-down"
-  "${ROOT_DIR}/bin/interface-down"
-  rm -f "${ROOT_DIR}/.run/active-mode"
+  "${ROOT_DIR}/bin/select" local || cleanup_failed=true
+  "${ROOT_DIR}/bin/services-down" || cleanup_failed=true
+  "${ROOT_DIR}/bin/nat-down" || cleanup_failed=true
+  "${ROOT_DIR}/bin/interface-down" || cleanup_failed=true
+  if [[ "${cleanup_failed}" == true ]]; then
+    die "cleanup was incomplete; session state was retained for another pxeboot down"
+  fi
+  clear_session_env
   printf 'PXE lab is down; next boot target is local.\n'
+  [[ "${lock_held}" == true ]] || finish_lifecycle
 }
 
 show_status() {
-  load_env
-  local active_mode='' interface_state=down link_state nat_state=down target=unknown
-  [[ ! -s "${ROOT_DIR}/.run/active-mode" ]] || active_mode="$(<"${ROOT_DIR}/.run/active-mode")"
-  if [[ -n "${active_mode}" && "${active_mode}" != "${PXE_MODE}" ]]; then
-    printf 'mode      %s (active session: %s; run pxeboot down)\n' "${PXE_MODE}" "${active_mode}"
-  else
-    printf 'mode      %s\n' "${PXE_MODE}"
+  local session_state=none
+  if use_session_env; then
+    session_state="$(sed -n '1p' "${SESSION_STATE_FILE}" 2>/dev/null || true)"
+    session_state="${session_state:-unknown}"
   fi
+  load_env
+  local current_ip='' interface_state=down link_state nat_state=down target=unknown
+  printf 'profile   %s (%s)\n' "${PXE_PROFILE}" "${PXE_MODE}"
+  printf 'session   %s\n' "${session_state}"
   if ifconfig "${PXE_INTERFACE}" 2>/dev/null | grep -Fq "inet ${PXE_SERVER_IP} "; then
     link_state="$(interface_link_state)"
     interface_state="up (${PXE_INTERFACE} ${PXE_SERVER_IP}; link ${link_state})"
+  elif ifconfig "${PXE_INTERFACE}" >/dev/null 2>&1; then
+    read -r current_ip _ < <(interface_ipv4_raw "${PXE_INTERFACE}" || true) || true
+    interface_state="changed (${PXE_INTERFACE}; session ${PXE_SERVER_IP}; current ${current_ip:-none})"
   fi
   if [[ -s "${ROOT_DIR}/.run/pf-token" ]]; then
     nat_state=up
-  elif [[ "${PXE_MODE}" == proxy ]]; then
+  elif [[ "${PXE_MODE}" != dedicated ]]; then
     nat_state='not required'
   fi
   target="$(selected_target || printf 'unknown')"
+  printf 'boot URL  %s/boot.ipxe\n' "${PXE_BOOT_URL}"
   printf 'target    %s\n' "${target}"
   printf 'interface %s\n' "${interface_state}"
   printf 'NAT       %s\n' "${nat_state}"
   printf 'HTTP      %s\n' "$(pid_state "${ROOT_DIR}/.run/http.pid" "--directory ${ROOT_DIR}/www")"
-  printf 'dnsmasq   %s\n' "$(pid_state "${ROOT_DIR}/.run/dnsmasq.pid" "--conf-file=${ROOT_DIR}/build/dnsmasq.conf")"
-  if [[ "${PXE_MODE}" == proxy ]]; then
+  if [[ "${PXE_MODE}" == http ]]; then
+    printf 'dnsmasq   not required\n'
+  else
+    printf 'dnsmasq   %s\n' "$(pid_state "${ROOT_DIR}/.run/dnsmasq.pid" "--conf-file=${ROOT_DIR}/build/dnsmasq.conf")"
+  fi
+  if [[ "${PXE_MODE}" != dedicated ]]; then
     printf '\nClient (router lease):\n'
   else
     printf '\nLeases:\n'
@@ -187,6 +266,7 @@ show_status() {
 }
 
 installer_ssh() {
+  use_session_env || true
   load_env
   local ip="${1:-}" target user
   [[ -n "${ip}" ]] || ip="$(recent_client_ip || true)"
@@ -201,12 +281,149 @@ installer_ssh() {
 }
 
 fedora_rdp() {
+  use_session_env || true
   load_env
   local ip="${1:-}"
   [[ -n "${ip}" ]] || ip="$(recent_client_ip || true)"
   [[ -n "${ip}" ]] || die "no client IP; boot Fedora or pass an IP"
   "${ROOT_DIR}/bin/fedora-credentials"
   printf 'Fedora installer RDP endpoint: %s:3389\n' "${ip}"
+}
+
+show_topology() {
+  load_env
+  local client_ip='' gateway='' route_interface=''
+  route_interface="$(default_route_interface || true)"
+  gateway="$(netstat -rn -f inet 2>/dev/null | awk '$1 == "default" { print $2; exit }')"
+  client_ip="$(arp -an 2>/dev/null | awk -v mac="${PXE_CLIENT_MAC:-}" '
+    tolower($4) == tolower(mac) {
+      gsub(/[()]/, "", $2)
+      print $2
+      exit
+    }
+  ')"
+  printf 'profile       %s (%s)\n' "${PXE_PROFILE}" "${PXE_MODE}"
+  printf 'PXE interface %s' "${PXE_INTERFACE}"
+  [[ "${PXE_CONFIGURED_INTERFACE}" != auto ]] || printf ' (auto)'
+  printf '\nserver        %s\n' "${PXE_SERVER_IP}"
+  printf 'subnet        %s (%s)\n' "${PXE_SUBNET}" "${PXE_NETMASK}"
+  printf 'boot URL      %s/boot.ipxe\n' "${PXE_BOOT_URL}"
+  printf 'default route %s via %s\n' "${route_interface:-unknown}" "${gateway:-unknown}"
+  printf 'HP client     %s (%s)\n' "${client_ip:-not in ARP cache}" "${PXE_CLIENT_MAC:-not configured}"
+  case "${PXE_MODE}" in
+    proxy) printf 'services      router DHCP + Mac ProxyDHCP/TFTP/HTTP; no Mac NAT\n' ;;
+    dedicated) printf 'services      Mac DHCP/TFTP/HTTP + NAT through %s\n' "${PXE_UPLINK_INTERFACE}" ;;
+    http) printf 'services      router DHCP + ESP bootstrap + Mac HTTP only\n' ;;
+  esac
+}
+
+generate_bootstrap() {
+  acquire_lifecycle_lock
+  [[ ! -s "${SESSION_FILE}" ]] || die "a session is active; run pxeboot down before changing the ESP bootstrap"
+  use_session_env || true
+  load_env
+  "${ROOT_DIR}/bin/render"
+  printf 'generated %s\n' "${ROOT_DIR}/build/autoexec.ipxe"
+  printf 'served copy: %s/autoexec.ipxe\n' "${PXE_BOOT_URL}"
+  printf 'ESP destination on HP: /boot/efi/autoexec.ipxe\n'
+  finish_lifecycle
+}
+
+update_profile_env() {
+  local profile="$1" interface="$2" uplink="$3" server_ip="$4"
+  local subnet="$5" netmask="$6" boot_url="$7" temporary="${BASE_ENV_FILE}.tmp.$$"
+  umask 077
+  awk -v profile="${profile}" -v interface="${interface}" -v uplink="${uplink}" \
+      -v server_ip="${server_ip}" -v subnet="${subnet}" -v netmask="${netmask}" \
+      -v boot_url="${boot_url}" '
+    BEGIN {
+      keys[1]="PXE_PROFILE"; values[keys[1]]=profile
+      keys[2]="PXE_INTERFACE"; values[keys[2]]=interface
+      keys[3]="PXE_UPLINK_INTERFACE"; values[keys[3]]=uplink
+      keys[4]="PXE_SERVER_IP"; values[keys[4]]=server_ip
+      keys[5]="PXE_SUBNET"; values[keys[5]]=subnet
+      keys[6]="PXE_NETMASK"; values[keys[6]]=netmask
+      keys[7]="PXE_BOOT_URL"; values[keys[7]]=boot_url
+    }
+    {
+      key=$0; sub(/=.*/, "", key)
+      if (key in values) { print key "=" values[key]; seen[key]=1; next }
+      print
+    }
+    END { for (i=1; i<=7; i++) if (!seen[keys[i]]) print keys[i] "=" values[keys[i]] }
+  ' "${BASE_ENV_FILE}" > "${temporary}"
+  mv "${temporary}" "${BASE_ENV_FILE}"
+  chmod 600 "${BASE_ENV_FILE}"
+}
+
+profile_command() {
+  local action="${1:-show}"
+  shift || true
+  case "${action}" in
+    list)
+      [[ "$#" -eq 0 ]] || die "usage: pxeboot profile list"
+      printf '%-16s %s\n' shared-router 'router DHCP + MAC-scoped ProxyDHCP/TFTP + HTTP'
+      printf '%-16s %s\n' direct-cable 'isolated explicit Ethernet + Mac DHCP/NAT + HTTP'
+      printf '%-16s %s\n' esp-http 'router DHCP + enrolled ESP iPXE + HTTP only'
+      ;;
+    show)
+      [[ "$#" -eq 0 ]] || die "usage: pxeboot profile show"
+      show_topology
+      ;;
+    detect)
+      [[ "$#" -eq 0 ]] || die "usage: pxeboot profile detect"
+      [[ -f "${BASE_ENV_FILE}" ]] || die "configuration not found: ${BASE_ENV_FILE}"
+      PXE_CLIENT_MAC=''
+      # shellcheck disable=SC1090
+      source "${BASE_ENV_FILE}"
+      local client_interface default_interface
+      client_interface="$(client_arp_interface "${PXE_CLIENT_MAC:-}" || true)"
+      default_interface="$(default_route_interface || true)"
+      if [[ -n "${client_interface}" && "${client_interface}" == "${default_interface}" ]]; then
+        printf 'recommended shared-router\n'
+        printf 'reason      HP MAC and the default route are both visible on %s\n' "${client_interface}"
+      elif [[ -n "${client_interface}" ]]; then
+        printf 'recommended esp-http or routed DHCP relay\n'
+        printf 'reason      HP is on %s while the default route is %s\n' \
+          "${client_interface}" "${default_interface:-unknown}"
+      else
+        printf 'recommended undetermined\n'
+        printf 'reason      HP is not in ARP; choose shared-router or esp-http explicitly\n'
+      fi
+      printf 'safety      direct-cable is never selected automatically\n'
+      ;;
+    use)
+      [[ "$#" -ge 1 ]] || die "usage: pxeboot profile use PROFILE [INTERFACE|BOOT_URL]"
+      acquire_lifecycle_lock
+      [[ ! -s "${SESSION_FILE}" ]] || die "a session is active; run pxeboot down before changing profiles"
+      local profile="$1"
+      shift
+      case "${profile}" in
+        shared-router)
+          [[ "$#" -eq 0 ]] || die "usage: pxeboot profile use shared-router"
+          update_profile_env shared-router auto auto auto auto auto auto
+          ;;
+        direct-cable)
+          [[ "$#" -eq 1 ]] || die "usage: pxeboot profile use direct-cable INTERFACE"
+          [[ "$1" =~ ^[A-Za-z0-9._:-]+$ ]] || die "invalid interface: $1"
+          update_profile_env direct-cable "$1" auto 192.168.50.1 192.168.50.0/24 255.255.255.0 auto
+          ;;
+        esp-http)
+          [[ "$#" -eq 1 ]] || die "usage: pxeboot profile use esp-http http://STABLE-HOST:PORT"
+          [[ "$1" == http://* ]] || die "esp-http requires a stable http:// boot URL"
+          update_profile_env esp-http auto auto auto auto auto "${1%/}"
+          ;;
+        *) die "unknown profile: ${profile}" ;;
+      esac
+      printf 'selected profile %s\n' "${profile}"
+      case "${profile}" in
+        direct-cable) printf 'isolated interface %s; lab subnet 192.168.50.0/24\n' "$1" ;;
+        esp-http) printf 'run pxeboot bootstrap and install it as /boot/efi/autoexec.ipxe on the HP\n' ;;
+      esac
+      finish_lifecycle
+      ;;
+    *) die "usage: pxeboot profile [list|show|detect|use PROFILE]" ;;
+  esac
 }
 
 command_name="${1:-help}"
@@ -230,8 +447,11 @@ case "${command_name}" in
   restart)
     [[ "$#" -le 1 ]] || die "usage: pxeboot restart [target]"
     restart_target="${1:-$(selected_target || printf 'local')}"
-    lab_down
-    lab_up "${restart_target}"
+    is_target "${restart_target}" || die "unknown target: ${restart_target}"
+    acquire_lifecycle_lock
+    lab_down true
+    lab_up "${restart_target}" true
+    finish_lifecycle
     ;;
   rescue)
     [[ "$#" -eq 0 ]] || die "usage: pxeboot rescue"
@@ -240,7 +460,9 @@ case "${command_name}" in
     ;;
   select)
     [[ "$#" -eq 1 ]] || die "usage: pxeboot select TARGET"
+    acquire_lifecycle_lock
     "${ROOT_DIR}/bin/select" "$1"
+    finish_lifecycle
     ;;
   status)
     [[ "$#" -eq 0 ]] || die "usage: pxeboot status"
@@ -248,6 +470,7 @@ case "${command_name}" in
     ;;
   leases)
     [[ "$#" -eq 0 ]] || die "usage: pxeboot leases"
+    use_session_env || true
     "${ROOT_DIR}/bin/leases"
     ;;
   ssh)
@@ -269,9 +492,23 @@ case "${command_name}" in
     [[ "$#" -eq 0 ]] || die "usage: pxeboot doctor"
     exec "${ROOT_DIR}/bin/doctor"
     ;;
+  topology)
+    [[ "$#" -eq 0 ]] || die "usage: pxeboot topology"
+    show_topology
+    ;;
+  profile)
+    profile_command "$@"
+    ;;
+  bootstrap)
+    [[ "$#" -eq 0 ]] || die "usage: pxeboot bootstrap"
+    generate_bootstrap
+    ;;
   render)
     [[ "$#" -eq 0 ]] || die "usage: pxeboot render"
-    exec "${ROOT_DIR}/bin/render"
+    [[ ! -s "${SESSION_FILE}" ]] || die "a session is active; use pxeboot restart to apply configuration changes"
+    acquire_lifecycle_lock
+    "${ROOT_DIR}/bin/render"
+    finish_lifecycle
     ;;
   help|-h|--help)
     usage

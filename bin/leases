@@ -3,7 +3,15 @@
 source "$(cd "$(dirname "$0")" && pwd)/common"
 load_env
 
-if [[ "${PXE_MODE}" == proxy ]]; then
+if [[ "${PXE_MODE}" != dedicated ]]; then
+  if [[ -n "${PXE_CLIENT_IP:-}" ]]; then
+    printf '%-15s  %-17s  %s\n' "${PXE_CLIENT_IP}" "${PXE_CLIENT_MAC:-unknown}" "configured client address"
+    exit 0
+  fi
+  if [[ -z "${PXE_CLIENT_MAC:-}" ]]; then
+    printf 'client address is not auto-discoverable; pass it to pxeboot ssh/rdp or set PXE_CLIENT_IP\n'
+    exit 0
+  fi
   require_command arp
   require_command awk
   client_ip="$(arp -an | awk -v mac="${PXE_CLIENT_MAC}" '

@@ -2,8 +2,10 @@
 
 source "$(cd "$(dirname "$0")" && pwd)/common"
 load_env
-require_command dnsmasq
 require_command python3
+if [[ "${PXE_MODE}" != http ]]; then
+  require_command dnsmasq
+fi
 
 "${ROOT_DIR}/bin/render"
 mkdir -p "${ROOT_DIR}/.run"
@@ -19,6 +21,10 @@ python3 -m http.server "${PXE_HTTP_PORT}" --bind "${PXE_SERVER_IP}" --directory 
 http_pid=$!
 printf '%s\n' "${http_pid}" > "${ROOT_DIR}/.run/http.pid"
 printf 'HTTP serving http://%s:%s/ (pid %s)\n' "${PXE_SERVER_IP}" "${PXE_HTTP_PORT}" "${http_pid}"
+if [[ "${PXE_MODE}" == http ]]; then
+  printf 'dnsmasq is not required for %s. Ctrl-C stops HTTP.\n' "${PXE_PROFILE}"
+  wait "${http_pid}"
+  exit
+fi
 printf 'Starting dnsmasq; sudo may ask for the Mac administrator password. Ctrl-C stops both services.\n'
 sudo dnsmasq --keep-in-foreground --conf-file="${ROOT_DIR}/build/dnsmasq.conf"
-

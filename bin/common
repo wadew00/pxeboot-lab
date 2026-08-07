@@ -4,20 +4,237 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${PXE_ENV_FILE:-${ROOT_DIR}/.env}"
+BASE_ENV_FILE="${ENV_FILE}"
+SESSION_FILE="${ROOT_DIR}/.run/session.env"
+SESSION_STATE_FILE="${ROOT_DIR}/.run/session.state"
+LOCK_FILE="${ROOT_DIR}/.run/lifecycle.lock"
 
 die() {
   printf 'error: %s\n' "$*" >&2
   exit 1
 }
 
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+default_route_interface() {
+  netstat -rn -f inet 2>/dev/null | awk '$1 == "default" { print $NF; exit }'
+}
+
+client_arp_interface() {
+  local mac="${1:-}"
+  [[ -n "${mac}" ]] || return 1
+  arp -an 2>/dev/null | awk -v mac="${mac}" '
+    tolower($4) == tolower(mac) {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "on") {
+          print $(i + 1)
+          exit
+        }
+      }
+    }
+  '
+}
+
+interface_ipv4_raw() {
+  ifconfig "$1" 2>/dev/null | awk '
+    $1 == "inet" && $2 !~ /^127\./ && $2 !~ /^169\.254\./ {
+      print $2, $4
+      exit
+    }
+  '
+}
+
+derive_ipv4_network() {
+  local address="$1"
+  local raw_netmask="$2"
+  python3 - "${address}" "${raw_netmask}" <<'PY'
+import ipaddress
+import sys
+
+address, raw_netmask = sys.argv[1:]
+if raw_netmask.lower().startswith("0x"):
+    raw_netmask = str(ipaddress.IPv4Address(int(raw_netmask, 16)))
+network = ipaddress.IPv4Network(f"{address}/{raw_netmask}", strict=False)
+print(network.netmask, network.with_prefixlen)
+PY
+}
+
+resolve_network_config() {
+  local configured_interface="${PXE_INTERFACE}"
+  local detected_interface='' detected_ip='' detected_mask='' network_values=''
+
+  if [[ "${PXE_SESSION_RESOLVED:-0}" == 1 ]]; then
+    PXE_CONFIGURED_INTERFACE="${PXE_CONFIGURED_INTERFACE:-${PXE_INTERFACE}}"
+    return
+  fi
+
+  if [[ "${PXE_INTERFACE}" == auto ]]; then
+    if [[ "${PXE_MODE}" == dedicated ]]; then
+      die "PXE_INTERFACE=auto is unsafe in direct-cable mode; select the isolated Ethernet interface explicitly"
+    fi
+    if [[ "${PXE_MODE}" == proxy ]]; then
+      detected_interface="$(client_arp_interface "${PXE_CLIENT_MAC:-}" || true)"
+    fi
+    [[ -n "${detected_interface}" ]] || detected_interface="$(default_route_interface || true)"
+    [[ -n "${detected_interface}" ]] || die "could not detect the shared-LAN interface"
+    case "${detected_interface}" in
+      lo*|utun*|awdl*|llw*) die "refusing unsafe auto-detected interface: ${detected_interface}" ;;
+    esac
+    PXE_INTERFACE="${detected_interface}"
+  fi
+  ifconfig "${PXE_INTERFACE}" >/dev/null 2>&1 || die "interface not found: ${PXE_INTERFACE}"
+
+  read -r detected_ip detected_mask < <(interface_ipv4_raw "${PXE_INTERFACE}" || true) || true
+  if [[ "${PXE_MODE}" == dedicated ]] && [[ -n "${detected_ip}" ]]; then
+    die "refusing direct-cable DHCP on ${PXE_INTERFACE}; it already has IPv4 address ${detected_ip}"
+  fi
+  if [[ "${PXE_SERVER_IP}" == auto ]]; then
+    [[ "${PXE_MODE}" != dedicated ]] || die "PXE_SERVER_IP=auto is unavailable in direct-cable mode"
+    [[ -n "${detected_ip}" ]] || die "${PXE_INTERFACE} has no usable IPv4 address"
+    PXE_SERVER_IP="${detected_ip}"
+  fi
+
+  if [[ "${PXE_NETMASK}" == auto ]]; then
+    [[ -n "${detected_mask}" ]] || die "cannot detect the netmask on ${PXE_INTERFACE}"
+    PXE_NETMASK="${detected_mask}"
+  fi
+  require_command python3
+  network_values="$(derive_ipv4_network "${PXE_SERVER_IP}" "${PXE_NETMASK}")" || \
+    die "invalid IPv4 address/netmask: ${PXE_SERVER_IP} ${PXE_NETMASK}"
+  read -r PXE_NETMASK derived_subnet <<< "${network_values}"
+  if [[ "${PXE_SUBNET}" == auto ]]; then
+    PXE_SUBNET="${derived_subnet}"
+  elif [[ "${PXE_SUBNET}" != "${derived_subnet}" ]]; then
+    die "PXE_SUBNET ${PXE_SUBNET} does not match ${PXE_SERVER_IP}/${PXE_NETMASK} (${derived_subnet})"
+  fi
+
+  if [[ "${PXE_MODE}" != dedicated ]]; then
+    PXE_UPLINK_INTERFACE="${PXE_INTERFACE}"
+  else
+    if [[ "${PXE_UPLINK_INTERFACE:-}" == auto ]]; then
+      PXE_UPLINK_INTERFACE="$(default_route_interface || true)"
+      [[ -n "${PXE_UPLINK_INTERFACE}" ]] || die "could not detect the default-route interface"
+    fi
+    [[ "${PXE_INTERFACE}" != "${PXE_UPLINK_INTERFACE}" ]] || \
+      die "direct-cable PXE interface and uplink must be different"
+    local uplink_ip='' uplink_mask='' uplink_values='' uplink_subnet=''
+    read -r uplink_ip uplink_mask < <(interface_ipv4_raw "${PXE_UPLINK_INTERFACE}" || true) || true
+    [[ -n "${uplink_ip}" && -n "${uplink_mask}" ]] || \
+      die "uplink ${PXE_UPLINK_INTERFACE} has no usable IPv4 address"
+    uplink_values="$(derive_ipv4_network "${uplink_ip}" "${uplink_mask}")"
+    read -r _ uplink_subnet <<< "${uplink_values}"
+    if python3 - "${PXE_SUBNET}" "${uplink_subnet}" <<'PY'
+import ipaddress
+import sys
+sys.exit(0 if ipaddress.ip_network(sys.argv[1]).overlaps(ipaddress.ip_network(sys.argv[2])) else 1)
+PY
+    then
+      die "direct subnet ${PXE_SUBNET} overlaps uplink subnet ${uplink_subnet}"
+    fi
+  fi
+
+  PXE_CONFIGURED_INTERFACE="${configured_interface}"
+}
+
+write_session_env() {
+  local temporary="${SESSION_FILE}.tmp.$$"
+  local previous_umask
+  local variable
+  local variables=(
+    PXE_SESSION_RESOLVED PXE_PROFILE PXE_MODE PXE_CONFIGURED_INTERFACE
+    PXE_INTERFACE PXE_UPLINK_INTERFACE PXE_SERVER_IP PXE_SUBNET PXE_NETMASK
+    PXE_CLIENT_MAC PXE_CLIENT_IP PXE_DHCP_START PXE_DHCP_END PXE_LEASE PXE_HTTP_PORT
+    PXE_BOOT_URL IPXE_EFI_BINARY PXE_SERVICE_USER PXE_SERVICE_GROUP
+    SSH_PUBLIC_KEY_FILE DEBIAN_NETBOOT_URL ALPINE_NETBOOT_URL ALPINE_REPO_URL
+    UBUNTU_NETBOOT_URL UBUNTU_ISO_URL FEDORA_TREE_URL FEDORA_RDP_USERNAME
+    FEDORA_RDP_PASSWORD ARCHISO_URL
+  )
+  mkdir -p "${ROOT_DIR}/.run"
+  previous_umask="$(umask)"
+  umask 077
+  PXE_SESSION_RESOLVED=1
+  : > "${temporary}"
+  for variable in "${variables[@]}"; do
+    if declare -p "${variable}" >/dev/null 2>&1; then
+      printf '%s=%q\n' "${variable}" "${!variable}" >> "${temporary}"
+    fi
+  done
+  mv "${temporary}" "${SESSION_FILE}"
+  chmod 600 "${SESSION_FILE}"
+  umask "${previous_umask}"
+}
+
+use_session_env() {
+  [[ -s "${SESSION_FILE}" ]] || return 1
+  PXE_ENV_FILE="${SESSION_FILE}"
+  ENV_FILE="${SESSION_FILE}"
+  export PXE_ENV_FILE
+}
+
+clear_session_env() {
+  rm -f "${SESSION_FILE}" "${SESSION_STATE_FILE}" "${ROOT_DIR}/.run/active-mode"
+  unset PXE_SESSION_RESOLVED PXE_PROFILE PXE_MODE PXE_CONFIGURED_INTERFACE
+  unset PXE_INTERFACE PXE_UPLINK_INTERFACE PXE_SERVER_IP PXE_SUBNET PXE_NETMASK
+  unset PXE_CLIENT_MAC PXE_CLIENT_IP PXE_DHCP_START PXE_DHCP_END PXE_LEASE PXE_HTTP_PORT
+  unset PXE_BOOT_URL IPXE_EFI_BINARY PXE_SERVICE_USER PXE_SERVICE_GROUP
+  unset SSH_PUBLIC_KEY_FILE DEBIAN_NETBOOT_URL ALPINE_NETBOOT_URL ALPINE_REPO_URL
+  unset UBUNTU_NETBOOT_URL UBUNTU_ISO_URL FEDORA_TREE_URL FEDORA_RDP_USERNAME
+  unset FEDORA_RDP_PASSWORD ARCHISO_URL
+  ENV_FILE="${BASE_ENV_FILE}"
+  PXE_ENV_FILE="${BASE_ENV_FILE}"
+  export PXE_ENV_FILE
+}
+
+release_lifecycle_lock() {
+  local owner=''
+  [[ -r "${LOCK_FILE}" ]] || return 0
+  owner="$(<"${LOCK_FILE}")"
+  [[ "${owner}" == "$$" ]] || return 0
+  rm -f "${LOCK_FILE}" 2>/dev/null || true
+}
+
+lifecycle_interrupt() {
+  exit "$1"
+}
+
+acquire_lifecycle_lock() {
+  local owner=''
+  mkdir -p "${ROOT_DIR}/.run"
+  require_command shlock
+  if ! shlock -f "${LOCK_FILE}" -p "$$"; then
+    [[ ! -r "${LOCK_FILE}" ]] || owner="$(<"${LOCK_FILE}")"
+    die "another pxeboot lifecycle command is running${owner:+ (pid ${owner})}"
+  fi
+  trap release_lifecycle_lock EXIT
+  trap 'lifecycle_interrupt 130' INT
+  trap 'lifecycle_interrupt 143' TERM
+}
+
 load_env() {
   [[ -f "${ENV_FILE}" ]] || die "missing .env; copy .env.example to .env and edit it"
   # shellcheck disable=SC1090
   source "${ENV_FILE}"
-  PXE_MODE="${PXE_MODE:-dedicated}"
+  PXE_PROFILE="${PXE_PROFILE:-}"
+  if [[ -z "${PXE_PROFILE}" ]]; then
+    case "${PXE_MODE:-dedicated}" in
+      proxy) PXE_PROFILE=shared-router ;;
+      dedicated) PXE_PROFILE=direct-cable ;;
+      http) PXE_PROFILE=esp-http ;;
+      *) PXE_PROFILE=manual ;;
+    esac
+  fi
+  case "${PXE_PROFILE}" in
+    shared-router|shared-proxy) PXE_PROFILE=shared-router; PXE_MODE=proxy ;;
+    direct-cable|direct) PXE_PROFILE=direct-cable; PXE_MODE=dedicated ;;
+    esp-http|shared-dns) PXE_PROFILE=esp-http; PXE_MODE=http ;;
+    manual) PXE_MODE="${PXE_MODE:-dedicated}" ;;
+    *) die "PXE_PROFILE must be shared-router, direct-cable, esp-http, or manual" ;;
+  esac
   case "${PXE_MODE}" in
-    dedicated|proxy) ;;
-    *) die "PXE_MODE must be dedicated or proxy" ;;
+    dedicated|proxy|http) ;;
+    *) die "PXE_MODE must be dedicated, proxy, or http" ;;
   esac
   : "${PXE_INTERFACE:?set PXE_INTERFACE in .env}"
   : "${PXE_SERVER_IP:?set PXE_SERVER_IP in .env}"
@@ -28,13 +245,36 @@ load_env() {
     : "${PXE_DHCP_START:?set PXE_DHCP_START in .env for dedicated mode}"
     : "${PXE_DHCP_END:?set PXE_DHCP_END in .env for dedicated mode}"
     : "${PXE_LEASE:?set PXE_LEASE in .env for dedicated mode}"
-  else
-    PXE_UPLINK_INTERFACE="${PXE_UPLINK_INTERFACE:-${PXE_INTERFACE}}"
-    : "${PXE_CLIENT_MAC:?set PXE_CLIENT_MAC in .env for proxy mode}"
+  elif [[ "${PXE_MODE}" == proxy ]]; then
+    : "${PXE_CLIENT_MAC:?set PXE_CLIENT_MAC in .env for ${PXE_PROFILE}}"
     [[ "${PXE_CLIENT_MAC}" =~ ^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$ ]] || \
       die "PXE_CLIENT_MAC must be a colon-separated MAC address"
   fi
+  if [[ -n "${PXE_CLIENT_MAC:-}" ]]; then
+    [[ "${PXE_CLIENT_MAC}" =~ ^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$ ]] || \
+      die "PXE_CLIENT_MAC must be a colon-separated MAC address"
+  fi
+  PXE_CLIENT_IP="${PXE_CLIENT_IP:-}"
+  if [[ -n "${PXE_CLIENT_IP}" ]]; then
+    python3 - "${PXE_CLIENT_IP}" <<'PY' || die "PXE_CLIENT_IP must be a valid IPv4 address"
+import ipaddress
+import sys
+ipaddress.IPv4Address(sys.argv[1])
+PY
+  fi
+  resolve_network_config
   : "${PXE_HTTP_PORT:?set PXE_HTTP_PORT in .env}"
+  [[ "${PXE_HTTP_PORT}" =~ ^[0-9]+$ ]] && (( PXE_HTTP_PORT >= 1 && PXE_HTTP_PORT <= 65535 )) || \
+    die "PXE_HTTP_PORT must be between 1 and 65535"
+  PXE_BOOT_URL="${PXE_BOOT_URL:-auto}"
+  if [[ "${PXE_BOOT_URL}" == auto ]]; then
+    PXE_BOOT_URL="http://${PXE_SERVER_IP}:${PXE_HTTP_PORT}"
+  fi
+  case "${PXE_BOOT_URL}" in
+    http://*) ;;
+    *) die "PXE_BOOT_URL must be auto or an http:// base URL (the managed server is plain HTTP)" ;;
+  esac
+  PXE_BOOT_URL="${PXE_BOOT_URL%/}"
   : "${IPXE_EFI_BINARY:?set IPXE_EFI_BINARY in .env}"
   case "${IPXE_EFI_BINARY}" in
     snponly.efi|ipxe.efi) ;;
@@ -58,8 +298,4 @@ load_env() {
     [[ "${FEDORA_RDP_PASSWORD}" =~ ^[A-Za-z0-9._-]{8,64}$ ]] || die "FEDORA_RDP_PASSWORD must be auto or 8-64 safe characters"
   fi
   : "${ARCHISO_URL:?set ARCHISO_URL in .env}"
-}
-
-require_command() {
-  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }

@@ -6,12 +6,12 @@ require_command ifconfig
 
 ifconfig "${PXE_INTERFACE}" >/dev/null 2>&1 || die "interface not found: ${PXE_INTERFACE}"
 
-if [[ "${PXE_MODE}" == proxy ]]; then
+if [[ "${PXE_MODE}" != dedicated ]]; then
   if ! ifconfig "${PXE_INTERFACE}" | grep -Fq "inet ${PXE_SERVER_IP} "; then
-    die "proxy mode does not alter ${PXE_INTERFACE}; it must already have ${PXE_SERVER_IP}"
+    die "${PXE_PROFILE} does not alter ${PXE_INTERFACE}; it must already have ${PXE_SERVER_IP}"
   fi
-  printf 'using existing %s address %s (proxy mode; unchanged)\n' \
-    "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
+  printf 'using existing %s address %s (%s; unchanged)\n' \
+    "${PXE_INTERFACE}" "${PXE_SERVER_IP}" "${PXE_PROFILE}"
   exit 0
 fi
 
@@ -20,7 +20,14 @@ if ifconfig "${PXE_INTERFACE}" | grep -Fq "inet ${PXE_SERVER_IP} "; then
   exit 0
 fi
 
-sudo ifconfig "${PXE_INTERFACE}" inet "${PXE_SERVER_IP}" netmask "${PXE_NETMASK}" alias
 mkdir -p "${ROOT_DIR}/.run"
-printf '%s\n%s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}" > "${ROOT_DIR}/.run/interface-alias"
+[[ ! -e "${ROOT_DIR}/.run/interface-alias" ]] || \
+  die "managed interface state already exists; run pxeboot down first"
+state_temporary="${ROOT_DIR}/.run/interface-alias.tmp.$$"
+printf '%s\n%s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}" > "${state_temporary}"
+mv "${state_temporary}" "${ROOT_DIR}/.run/interface-alias"
+if ! sudo ifconfig "${PXE_INTERFACE}" inet "${PXE_SERVER_IP}" netmask "${PXE_NETMASK}" alias; then
+  rm -f "${ROOT_DIR}/.run/interface-alias"
+  die "failed to add ${PXE_SERVER_IP} to ${PXE_INTERFACE}"
+fi
 printf 'configured %s with %s (%s)\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}" "${PXE_NETMASK}"

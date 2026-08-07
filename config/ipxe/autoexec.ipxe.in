@@ -1,0 +1,18 @@
+#!ipxe
+
+dhcp net0 || goto failed
+
+# Prefer the current ProxyDHCP URL when one is available. The configured
+# unicast HTTP URL is the routed/DNS and last-known fallback.
+isset ${proxydhcp/filename} || goto configured
+chain --autofree ${proxydhcp/filename} || goto configured
+exit
+
+:configured
+chain --autofree @@PXE_BOOT_URL@@/boot.ipxe || goto failed
+exit
+
+:failed
+echo Provisioning server unavailable; returning to UEFI.
+sleep 3
+exit 1

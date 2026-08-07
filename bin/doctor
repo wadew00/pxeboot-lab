@@ -4,8 +4,10 @@ source "$(cd "$(dirname "$0")" && pwd)/common"
 load_env
 
 failed=0
-printf 'mode %s\n' "${PXE_MODE}"
-for command_name in dnsmasq curl python3 tar openssl; do
+printf 'profile %s (%s)\n' "${PXE_PROFILE}" "${PXE_MODE}"
+commands=(curl python3 tar openssl)
+[[ "${PXE_MODE}" == http ]] || commands=(dnsmasq "${commands[@]}")
+for command_name in "${commands[@]}"; do
   if command -v "${command_name}" >/dev/null 2>&1; then
     printf 'ok   command %-10s %s\n' "${command_name}" "$(command -v "${command_name}")"
   else
@@ -23,17 +25,26 @@ fi
 
 if ifconfig "${PXE_INTERFACE}" 2>/dev/null | grep -Fq "inet ${PXE_SERVER_IP} "; then
   printf 'ok   interface %s has %s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
-elif [[ "${PXE_MODE}" == proxy ]]; then
-  printf 'FAIL proxy interface %s does not have configured address %s\n' \
-    "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
+elif [[ "${PXE_MODE}" != dedicated ]]; then
+  printf 'FAIL %s interface %s does not have resolved address %s\n' \
+    "${PXE_PROFILE}" "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
   failed=1
 else
   printf 'WARN interface %s does not currently have %s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
 fi
 
-if [[ "${PXE_MODE}" == proxy ]]; then
-  printf 'ok   ProxyDHCP restricted to HP MAC %s\n' "${PXE_CLIENT_MAC}"
-  if command -v arp >/dev/null 2>&1; then
+if [[ "${PXE_MODE}" != dedicated ]]; then
+  if [[ "${PXE_MODE}" == proxy ]]; then
+    printf 'ok   ProxyDHCP restricted to HP MAC %s\n' "${PXE_CLIENT_MAC}"
+  else
+    printf 'ok   DHCP/TFTP disabled; ESP iPXE uses %s\n' "${PXE_BOOT_URL}"
+    if [[ "${PXE_BOOT_URL}" == "http://${PXE_SERVER_IP}:"* ]]; then
+      printf 'WARN esp-http uses a literal Mac IP; reserve it or reinstall autoexec.ipxe after an address change\n'
+    fi
+  fi
+  if [[ -n "${PXE_CLIENT_IP:-}" ]]; then
+    printf 'ok   configured HP client address %s\n' "${PXE_CLIENT_IP}"
+  elif [[ -n "${PXE_CLIENT_MAC:-}" ]] && command -v arp >/dev/null 2>&1; then
     client_ip="$(arp -an | awk -v mac="${PXE_CLIENT_MAC}" '
       tolower($4) == tolower(mac) {
         gsub(/[()]/, "", $2)
@@ -62,13 +73,21 @@ else
   failed=1
 fi
 
-for asset in "tftp/${IPXE_EFI_BINARY}"; do
-  if [[ -s "${ROOT_DIR}/${asset}" ]]; then
-    printf 'ok   asset %s\n' "${asset}"
-  else
-    printf 'WARN asset missing: %s\n' "${asset}"
-  fi
-done
+if [[ "${PXE_MODE}" != http ]]; then
+  for asset in "tftp/${IPXE_EFI_BINARY}"; do
+    if [[ -s "${ROOT_DIR}/${asset}" ]]; then
+      printf 'ok   asset %s\n' "${asset}"
+    else
+      printf 'WARN asset missing: %s\n' "${asset}"
+    fi
+  done
+fi
+
+if [[ -s "${ROOT_DIR}/build/autoexec.ipxe" ]]; then
+  printf 'ok   generated ESP bootstrap build/autoexec.ipxe\n'
+else
+  printf 'WARN ESP bootstrap is missing; run pxeboot render\n'
+fi
 
 if [[ -s "${ROOT_DIR}/www/assets/alpine/headless.apkovl.tar.gz" ]]; then
   printf 'ok   generated Alpine SSH overlay\n'

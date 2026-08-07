@@ -26,4 +26,4 @@ tag-if=set:pxe-firmware,tag:pxe-client,tag:!ipxe
 tag-if=set:pxe-ipxe,tag:pxe-client,tag:ipxe
 pxe-service=tag:pxe-firmware,BC_EFI,"iPXE UEFI",@@IPXE_EFI_BINARY@@,@@PXE_SERVER_IP@@
 pxe-service=tag:pxe-firmware,x86-64_EFI,"iPXE UEFI",@@IPXE_EFI_BINARY@@,@@PXE_SERVER_IP@@
-dhcp-boot=tag:pxe-ipxe,http://@@PXE_SERVER_IP@@:@@PXE_HTTP_PORT@@/boot.ipxe,,@@PXE_SERVER_IP@@
+dhcp-boot=tag:pxe-ipxe,@@PXE_BOOT_URL@@/boot.ipxe,,@@PXE_SERVER_IP@@

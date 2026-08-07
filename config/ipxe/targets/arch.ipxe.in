@@ -1,5 +1,5 @@
 #!ipxe
-set base http://${next-server}:@@PXE_HTTP_PORT@@
+set base @@PXE_BOOT_URL@@
 set archiso @@ARCHISO_URL@@
 kernel ${archiso}/arch/boot/x86_64/vmlinuz-linux ip=dhcp archiso_http_srv=${archiso}/ archisobasedir=arch cms_verify=y ds=nocloud-net;s=${base}/cloud-init/arch/
 initrd ${archiso}/arch/boot/x86_64/initramfs-linux.img

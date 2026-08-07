@@ -30,10 +30,11 @@ fi
 
 printf '%s\n' "${key}" > "${ROOT_DIR}/www/authorized_keys"
 
-dnsmasq_template="${ROOT_DIR}/config/dnsmasq.conf.in"
-if [[ "${PXE_MODE}" == proxy ]]; then
-  dnsmasq_template="${ROOT_DIR}/config/dnsmasq-proxy.conf.in"
-fi
+case "${PXE_MODE}" in
+  dedicated) dnsmasq_template="${ROOT_DIR}/config/dnsmasq.conf.in" ;;
+  proxy) dnsmasq_template="${ROOT_DIR}/config/dnsmasq-proxy.conf.in" ;;
+  http) dnsmasq_template="${ROOT_DIR}/config/dnsmasq-disabled.conf.in" ;;
+esac
 pxe_subnet_address="${PXE_SUBNET%/*}"
 
 sed \
@@ -47,15 +48,19 @@ sed \
   -e "s|@@PXE_NETMASK@@|${PXE_NETMASK}|g" \
   -e "s|@@PXE_LEASE@@|${PXE_LEASE:-}|g" \
   -e "s|@@PXE_HTTP_PORT@@|${PXE_HTTP_PORT}|g" \
+  -e "s|@@PXE_BOOT_URL@@|${PXE_BOOT_URL}|g" \
   -e "s|@@IPXE_EFI_BINARY@@|${IPXE_EFI_BINARY}|g" \
   -e "s|@@PXE_SERVICE_USER@@|${PXE_SERVICE_USER}|g" \
   -e "s|@@PXE_SERVICE_GROUP@@|${PXE_SERVICE_GROUP}|g" \
   "${dnsmasq_template}" > "${ROOT_DIR}/build/dnsmasq.conf"
 
 sed \
-  -e "s|@@PXE_SERVER_IP@@|${PXE_SERVER_IP}|g" \
-  -e "s|@@PXE_HTTP_PORT@@|${PXE_HTTP_PORT}|g" \
+  -e "s|@@PXE_BOOT_URL@@|${PXE_BOOT_URL}|g" \
   "${ROOT_DIR}/config/preseed.cfg.in" > "${ROOT_DIR}/www/preseed.cfg"
+
+sed \
+  -e "s|@@PXE_BOOT_URL@@|${PXE_BOOT_URL}|g" \
+  "${ROOT_DIR}/config/ipxe/autoexec.ipxe.in" > "${ROOT_DIR}/build/autoexec.ipxe"
 
 awk -v key="${key}" '{
   if ($0 == "@@SSH_PUBLIC_KEY@@") print "  - " key
@@ -78,6 +83,7 @@ for source in "${ROOT_DIR}"/config/ipxe/*.ipxe.in; do
   destination="${ROOT_DIR}/www/$(basename "${source}" .in)"
   sed \
     -e "s|@@PXE_HTTP_PORT@@|${PXE_HTTP_PORT}|g" \
+    -e "s|@@PXE_BOOT_URL@@|${PXE_BOOT_URL}|g" \
     -e "s|@@DEBIAN_NETBOOT_URL@@|${DEBIAN_NETBOOT_URL}|g" \
     -e "s|@@ALPINE_NETBOOT_URL@@|${ALPINE_NETBOOT_URL}|g" \
     -e "s|@@ALPINE_REPO_URL@@|${ALPINE_REPO_URL}|g" \
@@ -93,6 +99,7 @@ for source in "${ROOT_DIR}"/config/ipxe/targets/*.ipxe.in; do
   destination="${ROOT_DIR}/www/targets/$(basename "${source}" .in)"
   sed \
     -e "s|@@PXE_HTTP_PORT@@|${PXE_HTTP_PORT}|g" \
+    -e "s|@@PXE_BOOT_URL@@|${PXE_BOOT_URL}|g" \
     -e "s|@@DEBIAN_NETBOOT_URL@@|${DEBIAN_NETBOOT_URL}|g" \
     -e "s|@@ALPINE_NETBOOT_URL@@|${ALPINE_NETBOOT_URL}|g" \
     -e "s|@@ALPINE_REPO_URL@@|${ALPINE_REPO_URL}|g" \

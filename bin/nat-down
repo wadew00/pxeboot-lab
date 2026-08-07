@@ -7,21 +7,31 @@ require_command sysctl
 
 state_file="${ROOT_DIR}/.run/ip-forwarding.before"
 token_file="${ROOT_DIR}/.run/pf-token"
-if [[ ! -s "${token_file}" ]] && [[ ! -s "${state_file}" ]]; then
-  if [[ "${PXE_MODE}" == proxy ]]; then
-    printf 'NAT is not used in proxy mode\n'
+enable_output_file="${ROOT_DIR}/.run/pf-enable-output"
+if [[ ! -e "${token_file}" ]] && [[ ! -e "${state_file}" ]] && [[ ! -e "${enable_output_file}" ]]; then
+  if [[ "${PXE_MODE}" != dedicated ]]; then
+    printf 'NAT is not used in %s\n' "${PXE_PROFILE}"
   else
     printf 'PXE NAT is not enabled\n'
   fi
   exit 0
 fi
 
+pf_token=''
+if [[ -s "${token_file}" ]]; then
+  pf_token="$(<"${token_file}")"
+elif [[ -s "${enable_output_file}" ]]; then
+  pf_token="$(awk '$1 == "Token" { print $NF; exit }' "${enable_output_file}")"
+fi
+if [[ ! "${pf_token}" =~ ^[0-9]+$ ]]; then
+  printf 'error: PF ownership token is missing or malformed; state retained for manual recovery\n' >&2
+  return 1 2>/dev/null || exit 1
+fi
+
 sudo pfctl -a com.apple/pxe-lab -F all >/dev/null
 if [[ -r "${state_file}" ]] && [[ "$(<"${state_file}")" == 0 ]]; then
   sudo sysctl -w net.inet.ip.forwarding=0 >/dev/null
 fi
-if [[ -s "${token_file}" ]]; then
-  sudo pfctl -X "$(<"${token_file}")" >/dev/null
-fi
-rm -f "${state_file}" "${token_file}"
+sudo pfctl -X "${pf_token}" >/dev/null
+rm -f "${state_file}" "${token_file}" "${enable_output_file}"
 printf 'PXE NAT anchor cleared\n'

@@ -11,5 +11,4 @@ d-i mirror/http/proxy string
 d-i anna/choose_modules string network-console
 d-i preseed/early_command string anna-install network-console
 d-i network-console/password-disabled boolean true
-d-i network-console/authorized_keys_url string http://@@PXE_SERVER_IP@@:@@PXE_HTTP_PORT@@/authorized_keys
-
+d-i network-console/authorized_keys_url string @@PXE_BOOT_URL@@/authorized_keys

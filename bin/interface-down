@@ -5,11 +5,23 @@ load_env
 require_command ifconfig
 
 state_file="${ROOT_DIR}/.run/interface-alias"
-if [[ -s "${state_file}" ]]; then
+if [[ -e "${state_file}" ]]; then
   managed_interface="$(sed -n '1p' "${state_file}")"
   managed_ip="$(sed -n '2p' "${state_file}")"
-  [[ "${managed_interface}" =~ ^[A-Za-z0-9._:-]+$ ]] || die "invalid managed interface state"
-  [[ "${managed_ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid managed IP state"
+  if [[ ! "${managed_interface}" =~ ^[A-Za-z0-9._:-]+$ ]] || \
+     [[ ! "${managed_ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ "${PXE_MODE}" == dedicated ]] && \
+       [[ "${PXE_INTERFACE}" =~ ^[A-Za-z0-9._:-]+$ ]] && \
+       [[ "${PXE_SERVER_IP}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      printf 'WARN recovering malformed interface state from the frozen session\n' >&2
+      managed_interface="${PXE_INTERFACE}"
+      managed_ip="${PXE_SERVER_IP}"
+    else
+      rm -f "${state_file}"
+      printf 'WARN discarded malformed interface state; no safe address target was available\n' >&2
+      exit 0
+    fi
+  fi
   if ifconfig "${managed_interface}" 2>/dev/null | grep -Fq "inet ${managed_ip} "; then
     sudo ifconfig "${managed_interface}" inet "${managed_ip}" -alias
     printf 'removed managed address %s from %s\n' "${managed_ip}" "${managed_interface}"
@@ -20,16 +32,9 @@ if [[ -s "${state_file}" ]]; then
   exit 0
 fi
 
-if [[ "${PXE_MODE}" == proxy ]]; then
-  printf '%s is router-managed in proxy mode; address unchanged\n' "${PXE_INTERFACE}"
+if [[ "${PXE_MODE}" != dedicated ]]; then
+  printf '%s is externally managed in %s; address unchanged\n' "${PXE_INTERFACE}" "${PXE_PROFILE}"
   exit 0
 fi
 
-ifconfig "${PXE_INTERFACE}" >/dev/null 2>&1 || die "interface not found: ${PXE_INTERFACE}"
-if ! ifconfig "${PXE_INTERFACE}" | grep -Fq "inet ${PXE_SERVER_IP} "; then
-  printf '%s does not have %s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
-  exit 0
-fi
-
-sudo ifconfig "${PXE_INTERFACE}" inet "${PXE_SERVER_IP}" -alias
-printf 'removed %s from %s\n' "${PXE_SERVER_IP}" "${PXE_INTERFACE}"
+printf 'no pxeboot-managed interface address to remove\n'

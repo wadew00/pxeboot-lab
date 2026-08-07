@@ -5,6 +5,7 @@ build/
 tftp/
 www/assets/
 www/authorized_keys
+www/autoexec.ipxe
 www/boot.ipxe
 www/cloud-init/meta-data
 www/cloud-init/user-data

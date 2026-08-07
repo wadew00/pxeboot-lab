@@ -3,14 +3,15 @@
 source "$(cd "$(dirname "$0")" && pwd)/common"
 load_env
 
-if [[ "${PXE_MODE}" == proxy ]]; then
-  printf 'NAT not required in proxy mode; the router remains the client gateway\n'
+if [[ "${PXE_MODE}" != dedicated ]]; then
+  printf 'NAT not required in %s; the router remains the client gateway\n' "${PXE_PROFILE}"
   exit 0
 fi
 
 require_command pfctl
 require_command sysctl
 require_command awk
+require_command tee
 
 [[ "${PXE_INTERFACE}" != "${PXE_UPLINK_INTERFACE}" ]] || die "PXE and uplink interfaces must be different"
 ifconfig "${PXE_INTERFACE}" >/dev/null 2>&1 || die "interface not found: ${PXE_INTERFACE}"
@@ -19,23 +20,32 @@ ifconfig "${PXE_INTERFACE}" | grep -Fq "inet ${PXE_SERVER_IP} " || die "PXE addr
 
 mkdir -p "${ROOT_DIR}/.run"
 token_file="${ROOT_DIR}/.run/pf-token"
+enable_output_file="${ROOT_DIR}/.run/pf-enable-output"
 if [[ -s "${token_file}" ]]; then
   printf 'NAT already enabled for this lab\n'
   exit 0
 fi
+[[ ! -e "${enable_output_file}" ]] || die "incomplete PF ownership state exists; run pxeboot down first"
 forwarding_before="$(sysctl -n net.inet.ip.forwarding)"
-printf '%s\n' "${forwarding_before}" > "${ROOT_DIR}/.run/ip-forwarding.before"
+state_temporary="${ROOT_DIR}/.run/ip-forwarding.before.tmp.$$"
+printf '%s\n' "${forwarding_before}" > "${state_temporary}"
+mv "${state_temporary}" "${ROOT_DIR}/.run/ip-forwarding.before"
 
 rules="nat on ${PXE_UPLINK_INTERFACE} inet from ${PXE_SUBNET} to any -> (${PXE_UPLINK_INTERFACE})
 pass in quick on ${PXE_INTERFACE} inet from ${PXE_SUBNET} to any keep state
 pass out quick on ${PXE_UPLINK_INTERFACE} inet from ${PXE_SUBNET} to any keep state"
 
-pf_enable_output="$(printf '%s\n' "${rules}" | sudo pfctl -a com.apple/pxe-lab -Ef - 2>&1)"
-pf_token="$(printf '%s\n' "${pf_enable_output}" | awk '$1 == "Token" { print $NF; exit }')"
+if ! pf_enable_output="$(printf '%s\n' "${rules}" | sudo pfctl -a com.apple/pxe-lab -Ef - 2>&1 | tee "${enable_output_file}")"; then
+  printf '%s\n' "${pf_enable_output}" >&2
+  die "failed to load the PXE PF anchor; ownership output was retained"
+fi
+pf_token="$(awk '$1 == "Token" { print $NF; exit }' "${enable_output_file}")"
 if [[ ! "${pf_token}" =~ ^[0-9]+$ ]]; then
   printf '%s\n' "${pf_enable_output}" >&2
   die "PF was loaded but no valid enable-reference token was returned"
 fi
-printf '%s\n' "${pf_token}" > "${token_file}"
+token_temporary="${token_file}.tmp.$$"
+printf '%s\n' "${pf_token}" > "${token_temporary}"
+mv "${token_temporary}" "${token_file}"
 sudo sysctl -w net.inet.ip.forwarding=1 >/dev/null
 printf 'NAT enabled: %s -> %s\n' "${PXE_SUBNET}" "${PXE_UPLINK_INTERFACE}"
