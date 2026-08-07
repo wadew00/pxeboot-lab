@@ -1,0 +1,10 @@
+#!ipxe
+
+set base https://raw.githubusercontent.com/wadew00/pxeboot-lab/main/public
+chain --autofree ${base}/selected.ipxe?client=${net0/mac:hexhyp} || goto failed
+exit
+
+:failed
+echo Public boot configuration unavailable; returning to UEFI/local boot.
+sleep 3
+exit 1

@@ -1,0 +1,10 @@
+#cloud-config
+disable_root: false
+users:
+  - name: root
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK6pGW9SXfS6TxPn/KD46lmqlkxNcw2frLr1XCwsNg3U wadew-local
+ssh_pwauth: false
+runcmd:
+  - systemctl restart sshd.service

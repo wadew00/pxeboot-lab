@@ -1,0 +1,14 @@
+#!ipxe
+
+set base https://raw.githubusercontent.com/wadew00/pxeboot-lab/main/public
+set archiso https://geo.mirror.pkgbuild.com/iso/latest
+
+isset ${net0/ip} || dhcp net0 || goto failed
+kernel ${archiso}/arch/boot/x86_64/vmlinuz-linux ip=dhcp BOOTIF=01-${net0/mac:hexhyp} archiso_http_srv=${archiso}/ archisobasedir=arch cms_verify=y ds=nocloud-net;s=${base}/cloud-init/arch/ || goto failed
+initrd ${archiso}/arch/boot/x86_64/initramfs-linux.img || goto failed
+boot || goto failed
+
+:failed
+echo Public Arch rescue failed: ${errno}
+sleep 3
+exit 1
