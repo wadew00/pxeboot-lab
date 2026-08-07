@@ -24,9 +24,12 @@ rules="nat on ${PXE_UPLINK_INTERFACE} inet from ${PXE_SUBNET} to any -> (${PXE_U
 pass in quick on ${PXE_INTERFACE} inet from ${PXE_SUBNET} to any keep state
 pass out quick on ${PXE_UPLINK_INTERFACE} inet from ${PXE_SUBNET} to any keep state"
 
-printf '%s\n' "${rules}" | sudo pfctl -a com.apple/pxe-lab -f -
-pf_token="$(sudo pfctl -E 2>/dev/null | awk '/Token/ { print $3; exit }')"
-[[ -n "${pf_token}" ]] || die "PF was loaded but no enable-reference token was returned"
+pf_enable_output="$(printf '%s\n' "${rules}" | sudo pfctl -a com.apple/pxe-lab -Ef - 2>&1)"
+pf_token="$(printf '%s\n' "${pf_enable_output}" | awk '$1 == "Token" { print $NF; exit }')"
+if [[ ! "${pf_token}" =~ ^[0-9]+$ ]]; then
+  printf '%s\n' "${pf_enable_output}" >&2
+  die "PF was loaded but no valid enable-reference token was returned"
+fi
 printf '%s\n' "${pf_token}" > "${token_file}"
 sudo sysctl -w net.inet.ip.forwarding=1 >/dev/null
 printf 'NAT enabled: %s -> %s\n' "${PXE_SUBNET}" "${PXE_UPLINK_INTERFACE}"
