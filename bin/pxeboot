@@ -302,7 +302,12 @@ installer_ssh() {
     fedora|arch|alpine) user=root ;;
     *) die "cannot determine installer SSH user; use ssh user@${ip}" ;;
   esac
-  exec ssh "${user}@${ip}"
+  # Installer environments generate a fresh host key on every boot. Keep those
+  # ephemeral keys out of the user's persistent known_hosts database.
+  exec ssh \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    "${user}@${ip}"
 }
 
 fedora_rdp() {
