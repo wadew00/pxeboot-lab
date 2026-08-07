@@ -3,6 +3,7 @@
 import argparse
 import os
 import posixpath
+import re
 import sys
 import time
 import urllib.error
@@ -49,14 +50,18 @@ class PXEHandler(SimpleHTTPRequestHandler):
         for header in ("Range", "If-Modified-Since", "If-None-Match"):
             if self.headers.get(header):
                 request_headers[header] = self.headers[header]
-        request = urllib.request.Request(
-            upstream_url,
-            headers=request_headers,
-            method="HEAD" if head_only else "GET",
-        )
+        method = "HEAD" if head_only else "GET"
+
+        def open_upstream(headers):
+            request = urllib.request.Request(
+                upstream_url,
+                headers=headers,
+                method=method,
+            )
+            return urllib.request.urlopen(request, timeout=30)
 
         try:
-            upstream = urllib.request.urlopen(request, timeout=30)
+            upstream = open_upstream(request_headers)
         except urllib.error.HTTPError as error:
             self.send_error(error.code, f"vendor returned {error.reason}")
             print(
@@ -69,7 +74,7 @@ class PXEHandler(SimpleHTTPRequestHandler):
             print(f"PXE-PROXY {route} ERROR {error} {relative}", flush=True)
             return
 
-        with upstream:
+        try:
             self.send_response(upstream.status)
             for header in (
                 "Content-Type",
@@ -89,14 +94,66 @@ class PXEHandler(SimpleHTTPRequestHandler):
 
             total_header = upstream.headers.get("Content-Length")
             total = int(total_header) if total_header and total_header.isdigit() else 0
+            content_range = upstream.headers.get("Content-Range", "")
+            range_match = re.fullmatch(r"bytes (\d+)-(\d+)/(?:\d+|\*)", content_range)
+            upstream_start = int(range_match.group(1)) if range_match else 0
+            upstream_end = int(range_match.group(2)) if range_match else (
+                upstream_start + total - 1 if total else None
+            )
             transferred = 0
+            retries = 0
             last_report_bytes = 0
             last_report_time = time.monotonic()
+
+            def resume_upstream(reason):
+                nonlocal upstream, retries
+                resume_at = upstream_start + transferred
+                upstream.close()
+                while retries < 8:
+                    retries += 1
+                    retry_headers = dict(request_headers)
+                    range_end = f"-{upstream_end}" if upstream_end is not None else "-"
+                    retry_headers["Range"] = f"bytes={resume_at}{range_end}"
+                    print(
+                        f"PXE-PROXY {route} RETRY {relative} at={resume_at} "
+                        f"attempt={retries} reason={reason}",
+                        flush=True,
+                    )
+                    time.sleep(min(retries, 3))
+                    try:
+                        candidate = open_upstream(retry_headers)
+                    except (urllib.error.URLError, TimeoutError, OSError) as error:
+                        reason = error
+                        continue
+                    resumed_range = candidate.headers.get("Content-Range", "")
+                    resumed_match = re.fullmatch(
+                        r"bytes (\d+)-(\d+)/(?:\d+|\*)", resumed_range
+                    )
+                    if candidate.status == 206 and resumed_match and int(resumed_match.group(1)) == resume_at:
+                        upstream = candidate
+                        return
+                    candidate.close()
+                    reason = OSError("vendor did not honor resume range")
+                raise reason
+
             print(f"PXE-PROXY {route} START {relative} total={total}", flush=True)
             try:
                 while True:
-                    chunk = upstream.read(1024 * 1024)
+                    if total and transferred >= total:
+                        break
+                    try:
+                        chunk = upstream.read(1024 * 1024)
+                    except (urllib.error.URLError, TimeoutError, OSError) as error:
+                        if not total:
+                            raise
+                        resume_upstream(error)
+                        continue
                     if not chunk:
+                        if total and transferred < total:
+                            resume_upstream(
+                                OSError(f"incomplete vendor response: {transferred}/{total}")
+                            )
+                            continue
                         break
                     self.wfile.write(chunk)
                     transferred += len(chunk)
@@ -118,6 +175,14 @@ class PXEHandler(SimpleHTTPRequestHandler):
                     f"PXE-PROXY {route} DISCONNECTED {relative} bytes={transferred}/{total}",
                     flush=True,
                 )
+            except (urllib.error.URLError, TimeoutError, OSError) as error:
+                print(
+                    f"PXE-PROXY {route} ERROR {error} {relative} "
+                    f"bytes={transferred}/{total}",
+                    flush=True,
+                )
+        finally:
+            upstream.close()
 
 
 class PXEServer(ThreadingHTTPServer):
