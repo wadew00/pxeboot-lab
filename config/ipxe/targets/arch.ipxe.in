@@ -3,6 +3,8 @@ set base @@PXE_BOOT_URL@@
 set archiso @@ARCHISO_URL@@
 imgfetch --name pxestatus ${base}/event?stage=arch-kernel-start || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
+imgfetch --name pxestatus ${base}/event?stage=arch-net-ip-${net0/ip}-gw-${gateway}-dns-${dns} || echo Network status callback failed
+imgfree pxestatus || echo Status cleanup skipped
 kernel ${archiso}/arch/boot/x86_64/vmlinuz-linux ip=dhcp archiso_http_srv=${archiso}/ archisobasedir=arch cms_verify=y ds=nocloud-net;s=${base}/cloud-init/arch/ || goto failed
 imgfetch --name pxestatus ${base}/event?stage=arch-kernel-loaded || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
@@ -16,6 +18,7 @@ imgfree pxestatus || echo Status cleanup skipped
 boot || goto failed
 
 :failed
-imgfetch --name pxestatus ${base}/event?stage=arch-failed || echo Arch boot failed
+set boot_errno ${errno}
+imgfetch --name pxestatus ${base}/event?stage=arch-failed-errno-${boot_errno} || echo Arch boot failed with error ${boot_errno}
 imgfree pxestatus || echo Status cleanup skipped
 exit 1
