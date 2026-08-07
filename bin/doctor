@@ -16,6 +16,21 @@ for command_name in "${commands[@]}"; do
   fi
 done
 
+if [[ "${PXE_MODE}" != http ]]; then
+  managed_dnsmasq_pid=''
+  [[ ! -s "${ROOT_DIR}/.run/dnsmasq.pid" ]] || managed_dnsmasq_pid="$(<"${ROOT_DIR}/.run/dnsmasq.pid")"
+  conflicting_dnsmasq_pids="$(ps ax -o pid=,command= 2>/dev/null | awk -v managed="${managed_dnsmasq_pid}" -v root="${ROOT_DIR}" '
+    ($2 ~ /(^|\/)dnsmasq$/) && $1 != managed && index($0, root) { print $1 }
+  ')"
+  if [[ -n "${conflicting_dnsmasq_pids}" ]]; then
+    printf 'FAIL an old pxeboot dnsmasq is still running (pid(s): %s)\n' \
+      "$(printf '%s' "${conflicting_dnsmasq_pids}" | tr '\n' ' ')"
+    failed=1
+  else
+    printf 'ok   no conflicting dnsmasq process\n'
+  fi
+fi
+
 if ifconfig "${PXE_INTERFACE}" >/dev/null 2>&1; then
   printf 'ok   interface %s exists\n' "${PXE_INTERFACE}"
 else

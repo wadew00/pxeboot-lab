@@ -13,6 +13,17 @@ http_pid_file="${run_dir}/http.pid"
 dnsmasq_pid_file="${run_dir}/dnsmasq.pid"
 mkdir -p "${run_dir}"
 
+if [[ "${PXE_MODE}" != http ]]; then
+  managed_dnsmasq_pid=''
+  [[ ! -s "${dnsmasq_pid_file}" ]] || managed_dnsmasq_pid="$(<"${dnsmasq_pid_file}")"
+  conflicting_dnsmasq_pids="$(ps ax -o pid=,command= 2>/dev/null | awk -v managed="${managed_dnsmasq_pid}" -v root="${ROOT_DIR}" '
+    ($2 ~ /(^|\/)dnsmasq$/) && $1 != managed && index($0, root) { print $1 }
+  ')"
+  if [[ -n "${conflicting_dnsmasq_pids}" ]]; then
+    die "an old pxeboot dnsmasq already owns the PXE ports (pid(s): $(printf '%s' "${conflicting_dnsmasq_pids}" | tr '\n' ' ')); stop it, then retry"
+  fi
+fi
+
 pid_matches() {
   local pid="$1"
   local pattern="$2"
