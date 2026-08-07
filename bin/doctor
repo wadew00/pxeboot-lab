@@ -4,7 +4,7 @@ source "$(cd "$(dirname "$0")" && pwd)/common"
 load_env
 
 failed=0
-for command_name in dnsmasq curl python3 tar; do
+for command_name in dnsmasq curl python3 tar openssl; do
   if command -v "${command_name}" >/dev/null 2>&1; then
     printf 'ok   command %-10s %s\n' "${command_name}" "$(command -v "${command_name}")"
   else

@@ -12,6 +12,22 @@ key="$(awk 'NF >= 2 { print $1, $2; exit }' "${SSH_PUBLIC_KEY_FILE}")"
 mkdir -p "${ROOT_DIR}/build" "${ROOT_DIR}/www/cloud-init" "${ROOT_DIR}/www/cloud-init/arch"
 mkdir -p "${ROOT_DIR}/www/assets/alpine"
 mkdir -p "${ROOT_DIR}/www/targets"
+
+fedora_password_file="${ROOT_DIR}/.run/fedora-rdp-password"
+if [[ "${FEDORA_RDP_PASSWORD}" == auto ]]; then
+  mkdir -p "${ROOT_DIR}/.run"
+  if [[ ! -s "${fedora_password_file}" ]]; then
+    require_command openssl
+    previous_umask="$(umask)"
+    umask 077
+    openssl rand -hex 12 > "${fedora_password_file}"
+    umask "${previous_umask}"
+  fi
+  fedora_rdp_password="$(<"${fedora_password_file}")"
+else
+  fedora_rdp_password="${FEDORA_RDP_PASSWORD}"
+fi
+
 printf '%s\n' "${key}" > "${ROOT_DIR}/www/authorized_keys"
 
 sed \
@@ -58,6 +74,8 @@ for source in "${ROOT_DIR}"/config/ipxe/*.ipxe.in; do
     -e "s|@@UBUNTU_NETBOOT_URL@@|${UBUNTU_NETBOOT_URL}|g" \
     -e "s|@@UBUNTU_ISO_URL@@|${UBUNTU_ISO_URL}|g" \
     -e "s|@@FEDORA_TREE_URL@@|${FEDORA_TREE_URL}|g" \
+    -e "s|@@FEDORA_RDP_USERNAME@@|${FEDORA_RDP_USERNAME}|g" \
+    -e "s|@@FEDORA_RDP_PASSWORD@@|${fedora_rdp_password}|g" \
     -e "s|@@ARCHISO_URL@@|${ARCHISO_URL}|g" \
     "${source}" > "${destination}"
 done
@@ -71,9 +89,12 @@ for source in "${ROOT_DIR}"/config/ipxe/targets/*.ipxe.in; do
     -e "s|@@UBUNTU_NETBOOT_URL@@|${UBUNTU_NETBOOT_URL}|g" \
     -e "s|@@UBUNTU_ISO_URL@@|${UBUNTU_ISO_URL}|g" \
     -e "s|@@FEDORA_TREE_URL@@|${FEDORA_TREE_URL}|g" \
+    -e "s|@@FEDORA_RDP_USERNAME@@|${FEDORA_RDP_USERNAME}|g" \
+    -e "s|@@FEDORA_RDP_PASSWORD@@|${fedora_rdp_password}|g" \
     -e "s|@@ARCHISO_URL@@|${ARCHISO_URL}|g" \
     "${source}" > "${destination}"
 done
+chmod 600 "${ROOT_DIR}/www/targets/fedora.ipxe"
 
 overlay="$(mktemp -d "${TMPDIR:-/tmp}/pxe-alpine.XXXXXX")"
 cleanup_overlay() { rm -rf "${overlay}"; }

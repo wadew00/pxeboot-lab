@@ -35,6 +35,12 @@ load_env() {
   : "${UBUNTU_NETBOOT_URL:?set UBUNTU_NETBOOT_URL in .env}"
   : "${UBUNTU_ISO_URL:?set UBUNTU_ISO_URL in .env}"
   : "${FEDORA_TREE_URL:?set FEDORA_TREE_URL in .env}"
+  : "${FEDORA_RDP_USERNAME:?set FEDORA_RDP_USERNAME in .env}"
+  : "${FEDORA_RDP_PASSWORD:?set FEDORA_RDP_PASSWORD in .env}"
+  [[ "${FEDORA_RDP_USERNAME}" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid FEDORA_RDP_USERNAME"
+  if [[ "${FEDORA_RDP_PASSWORD}" != auto ]]; then
+    [[ "${FEDORA_RDP_PASSWORD}" =~ ^[A-Za-z0-9._-]{8,64}$ ]] || die "FEDORA_RDP_PASSWORD must be auto or 8-64 safe characters"
+  fi
   : "${ARCHISO_URL:?set ARCHISO_URL in .env}"
 }
 

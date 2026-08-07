@@ -9,12 +9,12 @@ Supported boot targets:
 | `local` | none | Safe default; exits PXE and continues the firmware boot order |
 | `debian` | `ssh installer@CLIENT_IP` | Debian Installer `network-console`; fully interactive over SSH |
 | `ubuntu` | `ssh installer@CLIENT_IP` | Subiquity live installer; SSH key is injected with NoCloud |
-| `fedora` | `ssh root@CLIENT_IP` | Anaconda maintenance/monitoring shell; see Fedora limitation below |
+| `fedora` | RDP to `CLIENT_IP:3389` | Full remote Anaconda UI; SSH remains available for maintenance |
 | `arch` | `ssh root@CLIENT_IP` | Archiso installer shell; run `archinstall` or install manually |
 | `alpine` | `ssh root@CLIENT_IP` | Headless live environment; run `setup-alpine` after login |
 | `menu` | local keyboard/display | Optional iPXE menu for diagnostics only |
 
-No target in this starter configuration performs an unattended disk write. Debian, Ubuntu, Arch, and Alpine remain operator-driven over SSH; Fedora provides SSH maintenance access but needs a separate reviewed Kickstart for headless installation.
+No target in this starter configuration performs an unattended disk write. Debian, Ubuntu, Arch, and Alpine remain operator-driven over SSH; Fedora is operator-driven through an RDP client.
 
 ## Network layout
 
@@ -86,14 +86,24 @@ After the machine has fetched the selected target, immediately return the server
 ```text
 Debian: ssh installer@CLIENT_IP
 Ubuntu: ssh installer@CLIENT_IP
-Fedora: ssh root@CLIENT_IP
+Fedora: RDP to CLIENT_IP:3389    full installer UI
+        ssh root@CLIENT_IP       maintenance shell
 Arch:   ssh root@CLIENT_IP       then run archinstall
 Alpine: ssh root@CLIENT_IP       then run setup-alpine
 ```
 
-### Fedora limitation
+### Fedora remote installation
 
-Anaconda's `inst.sshd` mode officially exposes SSH for monitoring and debugging; it does not transport the current installer UI over SSH. The included partial Kickstart authorizes the temporary root account but deliberately contains no disk or installation commands. A truly headless Fedora installation therefore needs either a reviewed full Kickstart profile or Anaconda's remote graphical mode. Do not mistake the Fedora SSH shell for an interactive Anaconda TUI.
+Fedora boots Anaconda with its official RDP remote-install mode. After selecting and booting Fedora, get the client address and temporary credentials:
+
+```sh
+./bin/leases
+./bin/fedora-credentials
+```
+
+Connect any RDP client to `CLIENT_IP:3389` and complete the normal Anaconda UI remotely. The default `FEDORA_RDP_PASSWORD=auto` generates a random password under the ignored `.run/` directory; it is never committed. `ssh root@CLIENT_IP` remains available with your SSH key for logs and maintenance, but the installation UI is in RDP.
+
+The RDP password is necessarily present in the installer's kernel command line and locally served iPXE script. Treat the provisioning network as trusted and isolated.
 
 ## HP EliteDesk firmware settings
 
