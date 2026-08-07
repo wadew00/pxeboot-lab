@@ -54,18 +54,29 @@ recent_target() {
 
 recent_client_ip() {
   if [[ "${PXE_MODE}" != dedicated ]]; then
+    local arp_ip='' http_log="${ROOT_DIR}/.run/http.log"
     if [[ -n "${PXE_CLIENT_IP:-}" ]]; then
       printf '%s\n' "${PXE_CLIENT_IP}"
       return
     fi
-    [[ -n "${PXE_CLIENT_MAC:-}" ]] || return 1
-    arp -an | awk -v mac="${PXE_CLIENT_MAC}" '
-      tolower($4) == tolower(mac) {
-        gsub(/[()]/, "", $2)
-        print $2
-        exit
-      }
-    '
+    if [[ -n "${PXE_CLIENT_MAC:-}" ]]; then
+      arp_ip="$(arp -an | awk -v mac="${PXE_CLIENT_MAC}" '
+        tolower($4) == tolower(mac) {
+          gsub(/[()]/, "", $2)
+          print $2
+          exit
+        }
+      ')"
+      if [[ -n "${arp_ip}" ]]; then
+        printf '%s\n' "${arp_ip}"
+        return
+      fi
+    fi
+    [[ -r "${http_log}" ]] || return 1
+    awk -v server="${PXE_SERVER_IP}" '
+      $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && $1 != server { ip=$1 }
+      END { if (ip) print ip }
+    ' "${http_log}"
     return
   fi
   local lease_file="${ROOT_DIR}/.run/dnsmasq.leases"
