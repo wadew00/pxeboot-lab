@@ -1,6 +1,6 @@
 # Headless iPXE provisioning lab
 
-This repository turns a Mac into a small UEFI PXE/iPXE server for an x86-64 bare-metal client such as an HP EliteDesk 800 G1 SFF. Selection and control files live on the Mac; installer payloads come directly from distro servers, so no preboot display is required.
+This repository turns a Mac into a small UEFI PXE/iPXE server for an x86-64 bare-metal client such as an HP EliteDesk 800 G1 SFF. Selection and control files live on the Mac; boot payloads originate from distro servers, so no preboot display is required.
 
 Supported boot targets:
 
@@ -87,11 +87,16 @@ On the first `up`, `pxeboot` downloads the configured UEFI iPXE chainloader if i
 
 All normal operations go through the globally linked `pxeboot` command. The wrapper resolves its symlink back to this repository, so it works from any directory.
 
-Only the EFI iPXE chainloader is downloaded to the Mac. Debian, Fedora, Arch, and Alpine fetch their boot payloads directly from their official CDN. Ubuntu fetches its kernel, initrd, and live-server ISO directly from Canonical. The vendor URLs are configurable in `.env`.
+Only the EFI iPXE chainloader is stored on the Mac. The HTTP service streams
+kernel/initramfs requests from the configured vendor CDNs without caching them;
+this works around the HP firmware iPXE driver's inability to route off-LAN and
+provides byte-level progress. After Linux starts, large installer/live payloads
+(including Ubuntu's ISO and Arch's rootfs) are fetched directly by the HP. Vendor
+URLs remain configurable in `.env`.
 
-The small HTTP server is still required for files unique to this lab: the generated
-iPXE selector, preseed/kickstart/NoCloud data, and the SSH public key. Large distro
-payloads do not pass through or get stored on the Mac.
+The HTTP server also provides files unique to this lab: the generated iPXE
+selector, preseed/kickstart/NoCloud data, and the SSH public key. Streamed boot
+files are never written to the Mac's disk.
 
 ### Why Ubuntu still needs an ISO
 
@@ -132,10 +137,11 @@ pxeboot topology
 pxeboot watch
 ```
 
-`pxeboot watch` prints concise live milestones from ProxyDHCP, iPXE downloads,
-cloud-init, and SSH readiness. Pressing Ctrl-C closes only the viewer; the PXE
-services keep running. Because installer payloads travel directly from the HP to
-vendor CDNs through the router, the Mac cannot show their byte counters.
+`pxeboot watch` prints concise live milestones from ProxyDHCP, streamed iPXE
+kernel/initramfs downloads (including byte counts), cloud-init, and SSH readiness.
+Pressing Ctrl-C closes only the viewer; the PXE services keep running. Downloads
+started later by Linux travel directly through the router and are shown as phase
+changes rather than byte counters.
 
 In router-managed profiles, `leases` and the automatic `ssh`/`rdp` address lookup use the HP's
 MAC entry in the Mac ARP cache because the router owns the DHCP lease. You may
@@ -258,7 +264,9 @@ machine and the classic iPXE chainloading loop.
   generated HTTP files still assume the home LAN is trusted.
 - `local` is the default and must remain the idle state.
 - Verify the client disk before confirming any partitioning screen.
-- Distro payloads come directly from vendor HTTPS endpoints on every boot. Their checksums/signatures are not pinned by this lab yet; add verification before treating it as a production provisioning system.
+- Boot payloads originate from vendor HTTPS endpoints on every boot; kernel and
+  initramfs are streamed through the Mac without storage. Their checksums/signatures
+  are not pinned by this lab yet; add verification before production use.
 
 ## Troubleshooting
 

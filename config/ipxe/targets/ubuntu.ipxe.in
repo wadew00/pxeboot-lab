@@ -1,13 +1,14 @@
 #!ipxe
 set base @@PXE_BOOT_URL@@
+set ipxe_ubuntu ${base}/vendor/ubuntu
 imgfetch --name pxestatus ${base}/event?stage=ubuntu-kernel-start || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
-kernel @@UBUNTU_NETBOOT_URL@@/linux ip=dhcp url=@@UBUNTU_ISO_URL@@ ds=nocloud-net;s=${base}/cloud-init/ --- || goto failed
+kernel ${ipxe_ubuntu}/linux ip=dhcp url=@@UBUNTU_ISO_URL@@ ds=nocloud-net;s=${base}/cloud-init/ --- || goto failed
 imgfetch --name pxestatus ${base}/event?stage=ubuntu-kernel-loaded || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
 imgfetch --name pxestatus ${base}/event?stage=ubuntu-initrd-start || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
-initrd @@UBUNTU_NETBOOT_URL@@/initrd || goto failed
+initrd ${ipxe_ubuntu}/initrd || goto failed
 imgfetch --name pxestatus ${base}/event?stage=ubuntu-initrd-loaded || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
 imgfetch --name pxestatus ${base}/event?stage=ubuntu-boot || echo Status callback failed

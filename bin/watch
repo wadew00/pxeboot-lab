@@ -56,6 +56,7 @@ print_event() {
     *'GET '*" 404 "*) printf '[%s] HTTP 404: %s\n' "$(date '+%H:%M:%S')" "${line}" ;;
     *'user class: iPXE'*) printf '[%s] HP iPXE istemcisi DHCP’de görüldü\n' "$(date '+%H:%M:%S')" ;;
     *'bootfile name:'*) printf '[%s] ProxyDHCP boot adresini gönderdi\n' "$(date '+%H:%M:%S')" ;;
+    *'PXE-PROXY '*) printf '[%s] %s\n' "$(date '+%H:%M:%S')" "${line#*PXE-PROXY }" ;;
   esac
 }
 

@@ -110,12 +110,36 @@ managed_process_running() {
   [[ "${process}" == *"${pattern}"* ]]
 }
 
+managed_http_running() {
+  local pid_file="${ROOT_DIR}/.run/http.pid" pid='' process=''
+  [[ -s "${pid_file}" ]] || return 1
+  pid="$(<"${pid_file}")"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+  process="$(ps -p "${pid}" -o command= 2>/dev/null || true)"
+  { [[ "${process}" == *"${ROOT_DIR}/bin/http-server"* ]] || [[ "${process}" == *http.server* ]]; } && \
+    [[ "${process}" == *"${ROOT_DIR}/www"* ]]
+}
+
+http_pid_state() {
+  local pid_file="${ROOT_DIR}/.run/http.pid" pid=''
+  if [[ ! -s "${pid_file}" ]]; then
+    printf 'down'
+    return
+  fi
+  pid="$(<"${pid_file}")"
+  if managed_http_running; then
+    printf 'up (pid %s)' "${pid}"
+  else
+    printf 'down (stale pid %s)' "${pid}"
+  fi
+}
+
 session_health_issue() {
   if ! ifconfig "${PXE_INTERFACE}" 2>/dev/null | grep -Fq "inet ${PXE_SERVER_IP} "; then
     printf '%s no longer has %s' "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
     return
   fi
-  if ! managed_process_running "${ROOT_DIR}/.run/http.pid" "--directory ${ROOT_DIR}/www"; then
+  if ! managed_http_running; then
     printf 'HTTP service is not running'
     return
   fi
@@ -252,7 +276,7 @@ show_status() {
   printf 'target    %s\n' "${target}"
   printf 'interface %s\n' "${interface_state}"
   printf 'NAT       %s\n' "${nat_state}"
-  printf 'HTTP      %s\n' "$(pid_state "${ROOT_DIR}/.run/http.pid" "--directory ${ROOT_DIR}/www")"
+  printf 'HTTP      %s\n' "$(http_pid_state)"
   if [[ "${PXE_MODE}" == http ]]; then
     printf 'dnsmasq   not required\n'
   else

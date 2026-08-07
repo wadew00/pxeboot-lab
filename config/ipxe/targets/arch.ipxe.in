@@ -1,16 +1,17 @@
 #!ipxe
 set base @@PXE_BOOT_URL@@
 set archiso @@ARCHISO_URL@@
+set ipxe_arch ${base}/vendor/arch
 imgfetch --name pxestatus ${base}/event?stage=arch-kernel-start || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
 imgfetch --name pxestatus ${base}/event?stage=arch-net-ip-${net0/ip}-gw-${gateway}-dns-${dns} || echo Network status callback failed
 imgfree pxestatus || echo Status cleanup skipped
-kernel ${archiso}/arch/boot/x86_64/vmlinuz-linux ip=dhcp archiso_http_srv=${archiso}/ archisobasedir=arch cms_verify=y ds=nocloud-net;s=${base}/cloud-init/arch/ || goto failed
+kernel ${ipxe_arch}/arch/boot/x86_64/vmlinuz-linux ip=dhcp archiso_http_srv=${archiso}/ archisobasedir=arch cms_verify=y ds=nocloud-net;s=${base}/cloud-init/arch/ || goto failed
 imgfetch --name pxestatus ${base}/event?stage=arch-kernel-loaded || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
 imgfetch --name pxestatus ${base}/event?stage=arch-initrd-start || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
-initrd ${archiso}/arch/boot/x86_64/initramfs-linux.img || goto failed
+initrd ${ipxe_arch}/arch/boot/x86_64/initramfs-linux.img || goto failed
 imgfetch --name pxestatus ${base}/event?stage=arch-initrd-loaded || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
 imgfetch --name pxestatus ${base}/event?stage=arch-boot || echo Status callback failed

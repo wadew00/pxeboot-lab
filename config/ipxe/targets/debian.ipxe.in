@@ -1,13 +1,14 @@
 #!ipxe
 set base @@PXE_BOOT_URL@@
+set ipxe_debian ${base}/vendor/debian
 imgfetch --name pxestatus ${base}/event?stage=debian-kernel-start || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
-kernel @@DEBIAN_NETBOOT_URL@@/linux auto=true priority=critical interface=auto netcfg/disable_autoconfig=false url=${base}/preseed.cfg --- || goto failed
+kernel ${ipxe_debian}/linux auto=true priority=critical interface=auto netcfg/disable_autoconfig=false url=${base}/preseed.cfg --- || goto failed
 imgfetch --name pxestatus ${base}/event?stage=debian-kernel-loaded || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
 imgfetch --name pxestatus ${base}/event?stage=debian-initrd-start || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
-initrd @@DEBIAN_NETBOOT_URL@@/initrd.gz || goto failed
+initrd ${ipxe_debian}/initrd.gz || goto failed
 imgfetch --name pxestatus ${base}/event?stage=debian-initrd-loaded || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
 imgfetch --name pxestatus ${base}/event?stage=debian-boot || echo Status callback failed

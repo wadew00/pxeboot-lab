@@ -17,7 +17,13 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-python3 -m http.server "${PXE_HTTP_PORT}" --bind "${PXE_SERVER_IP}" --directory "${ROOT_DIR}/www" &
+python3 "${ROOT_DIR}/bin/http-server" \
+  --bind "${PXE_SERVER_IP}" --port "${PXE_HTTP_PORT}" --root "${ROOT_DIR}/www" \
+  --route "debian=${DEBIAN_NETBOOT_URL}" \
+  --route "alpine=${ALPINE_NETBOOT_URL}" \
+  --route "ubuntu=${UBUNTU_NETBOOT_URL}" \
+  --route "fedora=${FEDORA_TREE_URL}" \
+  --route "arch=${ARCHISO_URL}" &
 http_pid=$!
 printf '%s\n' "${http_pid}" > "${ROOT_DIR}/.run/http.pid"
 printf 'HTTP serving http://%s:%s/ (pid %s)\n' "${PXE_SERVER_IP}" "${PXE_HTTP_PORT}" "${http_pid}"

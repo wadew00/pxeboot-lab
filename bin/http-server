@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+
+import argparse
+import os
+import posixpath
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+
+class PXEHandler(SimpleHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def do_GET(self):
+        if urllib.parse.urlsplit(self.path).path.startswith("/vendor/"):
+            self.proxy_vendor(head_only=False)
+        else:
+            super().do_GET()
+
+    def do_HEAD(self):
+        if urllib.parse.urlsplit(self.path).path.startswith("/vendor/"):
+            self.proxy_vendor(head_only=True)
+        else:
+            super().do_HEAD()
+
+    def proxy_vendor(self, head_only):
+        parsed = urllib.parse.urlsplit(self.path)
+        parts = parsed.path.split("/", 3)
+        if len(parts) != 4 or parts[2] not in self.server.vendor_routes:
+            self.send_error(404, "unknown vendor route")
+            return
+
+        route, relative = parts[2], urllib.parse.unquote(parts[3])
+        normalized = posixpath.normpath("/" + relative).lstrip("/")
+        if not relative or normalized != relative or relative.startswith("../"):
+            self.send_error(400, "invalid vendor path")
+            return
+
+        base = self.server.vendor_routes[route].rstrip("/")
+        quoted_path = urllib.parse.quote(relative, safe="/@:+~!$'()*,;=-._")
+        upstream_url = f"{base}/{quoted_path}"
+        if parsed.query:
+            upstream_url += "?" + parsed.query
+
+        request_headers = {"User-Agent": "pxeboot-stream-proxy/1"}
+        for header in ("Range", "If-Modified-Since", "If-None-Match"):
+            if self.headers.get(header):
+                request_headers[header] = self.headers[header]
+        request = urllib.request.Request(
+            upstream_url,
+            headers=request_headers,
+            method="HEAD" if head_only else "GET",
+        )
+
+        try:
+            upstream = urllib.request.urlopen(request, timeout=30)
+        except urllib.error.HTTPError as error:
+            self.send_error(error.code, f"vendor returned {error.reason}")
+            print(
+                f"PXE-PROXY {route} ERROR http-{error.code} {relative}",
+                flush=True,
+            )
+            return
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            self.send_error(502, "vendor connection failed")
+            print(f"PXE-PROXY {route} ERROR {error} {relative}", flush=True)
+            return
+
+        with upstream:
+            self.send_response(upstream.status)
+            for header in (
+                "Content-Type",
+                "Content-Length",
+                "Content-Range",
+                "Last-Modified",
+                "ETag",
+                "Accept-Ranges",
+            ):
+                value = upstream.headers.get(header)
+                if value is not None:
+                    self.send_header(header, value)
+            self.send_header("Connection", "close")
+            self.end_headers()
+            if head_only:
+                return
+
+            total_header = upstream.headers.get("Content-Length")
+            total = int(total_header) if total_header and total_header.isdigit() else 0
+            transferred = 0
+            last_report_bytes = 0
+            last_report_time = time.monotonic()
+            print(f"PXE-PROXY {route} START {relative} total={total}", flush=True)
+            try:
+                while True:
+                    chunk = upstream.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    transferred += len(chunk)
+                    now = time.monotonic()
+                    if transferred - last_report_bytes >= 32 * 1024 * 1024 or now - last_report_time >= 3:
+                        percent = f"{transferred * 100 / total:.1f}%" if total else "unknown"
+                        print(
+                            f"PXE-PROXY {route} PROGRESS {relative} bytes={transferred}/{total} percent={percent}",
+                            flush=True,
+                        )
+                        last_report_bytes = transferred
+                        last_report_time = now
+                print(
+                    f"PXE-PROXY {route} DONE {relative} bytes={transferred}/{total}",
+                    flush=True,
+                )
+            except (BrokenPipeError, ConnectionResetError):
+                print(
+                    f"PXE-PROXY {route} DISCONNECTED {relative} bytes={transferred}/{total}",
+                    flush=True,
+                )
+
+
+class PXEServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def parse_route(value):
+    if "=" not in value:
+        raise argparse.ArgumentTypeError("route must be NAME=URL")
+    name, url = value.split("=", 1)
+    parsed = urllib.parse.urlsplit(url)
+    if not name.replace("-", "").isalnum() or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise argparse.ArgumentTypeError("invalid route")
+    return name, url.rstrip("/")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--bind", required=True)
+    parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--root", required=True)
+    parser.add_argument("--route", action="append", type=parse_route, default=[])
+    args = parser.parse_args()
+
+    root = os.path.realpath(args.root)
+    if not os.path.isdir(root):
+        parser.error(f"document root does not exist: {root}")
+    os.chdir(root)
+
+    handler = lambda *handler_args, **handler_kwargs: PXEHandler(
+        *handler_args, directory=root, **handler_kwargs
+    )
+    server = PXEServer((args.bind, args.port), handler)
+    server.vendor_routes = dict(args.route)
+    print(f"PXE HTTP server listening on {args.bind}:{args.port}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

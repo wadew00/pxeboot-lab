@@ -48,7 +48,8 @@ fi
 if [[ -s "${http_pid_file}" ]]; then
   http_pid="$(<"${http_pid_file}")"
   http_command="$(pid_command "${http_pid}" || true)"
-  if [[ "${http_command}" == *http.server* && "${http_command}" == *"${ROOT_DIR}/www"* ]]; then
+  if { [[ "${http_command}" == *"${ROOT_DIR}/bin/http-server"* ]] || [[ "${http_command}" == *http.server* ]]; } && \
+     [[ "${http_command}" == *"${ROOT_DIR}/www"* ]]; then
     if kill "${http_pid}" && wait_for_exit "${http_pid}" "${ROOT_DIR}/www"; then
       printf 'HTTP server stopped (pid %s)\n' "${http_pid}"
       rm -f "${http_pid_file}"

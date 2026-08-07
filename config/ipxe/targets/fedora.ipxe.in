@@ -1,14 +1,15 @@
 #!ipxe
 set base @@PXE_BOOT_URL@@
 set fedora_tree @@FEDORA_TREE_URL@@
+set ipxe_fedora ${base}/vendor/fedora
 imgfetch --name pxestatus ${base}/event?stage=fedora-kernel-start || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
-kernel ${fedora_tree}/images/pxeboot/vmlinuz ip=dhcp inst.repo=${fedora_tree} inst.sshd inst.ks=${base}/fedora.ks inst.rdp inst.rdp.username=@@FEDORA_RDP_USERNAME@@ inst.rdp.password=@@FEDORA_RDP_PASSWORD@@ || goto failed
+kernel ${ipxe_fedora}/images/pxeboot/vmlinuz ip=dhcp inst.repo=${fedora_tree} inst.sshd inst.ks=${base}/fedora.ks inst.rdp inst.rdp.username=@@FEDORA_RDP_USERNAME@@ inst.rdp.password=@@FEDORA_RDP_PASSWORD@@ || goto failed
 imgfetch --name pxestatus ${base}/event?stage=fedora-kernel-loaded || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
 imgfetch --name pxestatus ${base}/event?stage=fedora-initrd-start || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
-initrd ${fedora_tree}/images/pxeboot/initrd.img || goto failed
+initrd ${ipxe_fedora}/images/pxeboot/initrd.img || goto failed
 imgfetch --name pxestatus ${base}/event?stage=fedora-initrd-loaded || echo Status callback failed
 imgfree pxestatus || echo Status cleanup skipped
 imgfetch --name pxestatus ${base}/event?stage=fedora-boot || echo Status callback failed

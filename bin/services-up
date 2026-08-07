@@ -32,7 +32,15 @@ pid_matches() {
 }
 
 http_started=false
-http_pattern="--directory ${ROOT_DIR}/www"
+http_pattern="${ROOT_DIR}/bin/http-server"
+legacy_http_pattern="--directory ${ROOT_DIR}/www"
+
+http_pid_matches() {
+  local pid="$1" command=''
+  command="$(ps -p "${pid}" -o command= 2>/dev/null || true)"
+  [[ "${command}" == *"${http_pattern}"* && "${command}" == *"--root ${ROOT_DIR}/www"* ]] || \
+    [[ "${command}" == *http.server* && "${command}" == *"${legacy_http_pattern}"* ]]
+}
 
 cleanup_on_exit() {
   local status=$?
@@ -44,19 +52,24 @@ cleanup_on_exit() {
 }
 trap cleanup_on_exit EXIT
 
-if [[ -s "${http_pid_file}" ]] && pid_matches "$(<"${http_pid_file}")" "${http_pattern}"; then
+if [[ -s "${http_pid_file}" ]] && http_pid_matches "$(<"${http_pid_file}")"; then
   printf 'HTTP server already running (pid %s)\n' "$(<"${http_pid_file}")"
 else
   rm -f "${http_pid_file}"
   : > "${run_dir}/http.log"
-  nohup python3 -m http.server "${PXE_HTTP_PORT}" \
-    --bind "${PXE_SERVER_IP}" \
-    --directory "${ROOT_DIR}/www" \
+  nohup python3 "${ROOT_DIR}/bin/http-server" \
+    --bind "${PXE_SERVER_IP}" --port "${PXE_HTTP_PORT}" \
+    --root "${ROOT_DIR}/www" \
+    --route "debian=${DEBIAN_NETBOOT_URL}" \
+    --route "alpine=${ALPINE_NETBOOT_URL}" \
+    --route "ubuntu=${UBUNTU_NETBOOT_URL}" \
+    --route "fedora=${FEDORA_TREE_URL}" \
+    --route "arch=${ARCHISO_URL}" \
     >> "${run_dir}/http.log" 2>&1 </dev/null &
   http_pid=$!
   printf '%s\n' "${http_pid}" > "${http_pid_file}"
   sleep 0.2
-  if ! pid_matches "${http_pid}" "${http_pattern}"; then
+  if ! http_pid_matches "${http_pid}"; then
     kill "${http_pid}" >/dev/null 2>&1 || true
     rm -f "${http_pid_file}"
     die "HTTP server failed; inspect ${run_dir}/http.log"
