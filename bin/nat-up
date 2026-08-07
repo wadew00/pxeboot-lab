@@ -9,6 +9,7 @@ require_command awk
 [[ "${PXE_INTERFACE}" != "${PXE_UPLINK_INTERFACE}" ]] || die "PXE and uplink interfaces must be different"
 ifconfig "${PXE_INTERFACE}" >/dev/null 2>&1 || die "interface not found: ${PXE_INTERFACE}"
 ifconfig "${PXE_UPLINK_INTERFACE}" >/dev/null 2>&1 || die "interface not found: ${PXE_UPLINK_INTERFACE}"
+ifconfig "${PXE_INTERFACE}" | grep -Fq "inet ${PXE_SERVER_IP} " || die "PXE address is missing; run ./bin/interface-up first"
 
 mkdir -p "${ROOT_DIR}/.run"
 token_file="${ROOT_DIR}/.run/pf-token"

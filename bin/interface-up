@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+source "$(cd "$(dirname "$0")" && pwd)/common"
+load_env
+require_command ifconfig
+
+ifconfig "${PXE_INTERFACE}" >/dev/null 2>&1 || die "interface not found: ${PXE_INTERFACE}"
+if ifconfig "${PXE_INTERFACE}" | grep -Fq "inet ${PXE_SERVER_IP} "; then
+  printf '%s already has %s\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}"
+  exit 0
+fi
+
+sudo ifconfig "${PXE_INTERFACE}" inet "${PXE_SERVER_IP}" netmask "${PXE_NETMASK}" alias
+printf 'configured %s with %s (%s)\n' "${PXE_INTERFACE}" "${PXE_SERVER_IP}" "${PXE_NETMASK}"

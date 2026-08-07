@@ -47,14 +47,14 @@ Only the EFI iPXE chainloader is downloaded to the Mac. Debian, Fedora, Arch, an
 
 Ubuntu's netboot `linux` and `initrd` only bootstrap the live-server environment. During boot, the initrd downloads the URL passed with `url=`, loop-mounts that ISO, and uses its live filesystem as the Subiquity installer runtime. The ISO is therefore required by Ubuntu's installer design, but it is downloaded by the HP directly from Canonical and is never stored on the Mac.
 
-Assign the configured address to the isolated adapter (this changes host networking and needs administrator privileges):
+Assign the `.env` address to the `.env` interface, then enable NAT (these change host networking and need administrator privileges):
 
 ```sh
-sudo ifconfig en5 inet 192.168.50.1 netmask 255.255.255.0 up
+./bin/interface-up
 ./bin/nat-up
 ```
 
-Replace `en5` and the address with the values in `.env`. Start both servers:
+Start both servers:
 
 ```sh
 ./bin/serve
@@ -64,6 +64,7 @@ When the lab is finished, stop `bin/serve` with Ctrl-C and clear only this lab's
 
 ```sh
 ./bin/nat-down
+./bin/interface-down
 ```
 
 Then choose the next boot from a second terminal and power-cycle/PXE-boot the HP:
