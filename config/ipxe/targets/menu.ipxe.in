@@ -5,7 +5,7 @@ item local Continue to local disk
 item --gap -- -------------- installers --------------
 item debian Debian stable - SSH installer
 item ubuntu Ubuntu Server - SSH installer
-item fedora Fedora Server - SSH maintenance shell
+item fedora Fedora Workstation - RDP installer
 item arch Arch Linux - SSH installer shell
 item alpine Alpine latest stable - SSH shell
 item shell iPXE shell

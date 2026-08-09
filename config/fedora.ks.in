@@ -1,3 +1,17 @@
-# This partial Kickstart exists only to authorize the temporary installer SSH
-# account. It intentionally contains no storage or installation commands.
+# Install the normal Fedora Workstation package environment while leaving disk
+# and installation choices interactive in Anaconda over RDP.
 @@FEDORA_SSH_ACCESS@@
+sshkey --username=root "@@SSH_PUBLIC_KEY@@"
+
+services --enabled=sshd
+firewall --enabled --service=ssh --port=3389:tcp
+
+%packages
+@^workstation-product-environment
+openssh-server
+gnome-remote-desktop
+%end
+
+%post
+systemctl set-default graphical.target
+%end

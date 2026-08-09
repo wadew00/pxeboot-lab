@@ -9,12 +9,26 @@ Supported boot targets:
 | `local` | none | Safe default; exits PXE and continues the firmware boot order |
 | `debian` | `ssh installer@CLIENT_IP` | Debian Installer `network-console`; fully interactive over SSH |
 | `ubuntu` | `ssh installer@CLIENT_IP` | Subiquity live installer; SSH key is injected with NoCloud |
-| `fedora` | RDP to `CLIENT_IP:3389` | Full remote Anaconda UI; SSH remains available for maintenance |
+| `fedora` | RDP to `CLIENT_IP:3389` | Normal Fedora Workstation; remote Anaconda UI, then native GNOME Remote Login |
 | `arch` | `ssh root@CLIENT_IP` | Archiso installer shell; run `archinstall` or install manually |
 | `alpine` | `ssh root@CLIENT_IP` | Headless live environment; run `setup-alpine` after login |
 | `menu` | local keyboard/display | Optional iPXE menu for diagnostics only |
 
 No target in this starter configuration performs an unattended disk write. Debian, Ubuntu, Arch, and Alpine remain operator-driven over SSH; Fedora is operator-driven through an RDP client.
+
+The Fedora target uses the official Everything network-install tree but selects
+`workstation-product-environment`; the installed result is the normal GNOME
+Fedora Workstation, not Fedora Server. It explicitly includes OpenSSH and GNOME
+Remote Desktop. After the first boot, connect once over SSH and enable native
+GNOME Remote Login with credentials of your choice:
+
+```sh
+grdctl --system rdp set-credentials REMOTE_USER 'A-NEW-STRONG-PASSWORD'
+grdctl --system rdp enable
+systemctl enable --now gnome-remote-desktop.service
+```
+
+RDP then provides a complete headless GNOME login and desktop on TCP 3389.
 
 ## Topology profiles
 

@@ -80,6 +80,7 @@ sed "s|@@PXE_CLIENT_MAC@@|${PXE_CLIENT_MAC}|g" \
 
 awk -v key="${key}" '{
   if ($0 == "@@FEDORA_SSH_ACCESS@@") print "sshpw --username=root --sshkey \"" key "\""
+  else if ($0 == "sshkey --username=root \"@@SSH_PUBLIC_KEY@@\"") print "sshkey --username=root \"" key "\""
   else print
 }' "${ROOT_DIR}/config/fedora.ks.in" > "${ROOT_DIR}/www/fedora.ks"
 
