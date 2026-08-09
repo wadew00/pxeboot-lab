@@ -1,0 +1,20 @@
+#!ipxe
+
+set base https://raw.githubusercontent.com/wadew00/pxeboot-lab/main/public
+set fedora_tree https://download.fedoraproject.org/pub/fedora/linux/releases/44/Server/x86_64/os
+set rdp_username installer
+set rdp_password pxe-${net0/mac:hexhyp}
+
+isset ${net0/ip} || dhcp net0 || goto failed
+echo Fedora Anaconda remote installer
+echo RDP address: ${net0/ip}:3389
+echo RDP username: ${rdp_username}
+echo RDP password: ${rdp_password}
+kernel ${fedora_tree}/images/pxeboot/vmlinuz ip=dhcp BOOTIF=01-${net0/mac:hexhyp} inst.repo=${fedora_tree} inst.rdp inst.rdp.username=${rdp_username} inst.rdp.password=${rdp_password} inst.sshd inst.ks=${base}/fedora.ks || goto failed
+initrd ${fedora_tree}/images/pxeboot/initrd.img || goto failed
+boot || goto failed
+
+:failed
+echo Public Fedora installer failed: ${errno}
+sleep 3
+exit 1

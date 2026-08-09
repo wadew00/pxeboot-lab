@@ -1,7 +1,7 @@
 #!ipxe
 
 set base https://raw.githubusercontent.com/wadew00/pxeboot-lab/main/public
-chain --autofree ${base}/selected.ipxe?client=${net0/mac:hexhyp} || goto failed
+chain --autofree ${base}/selected.ipxe || goto failed
 exit
 
 :failed

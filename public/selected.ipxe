@@ -1,4 +1,4 @@
 #!ipxe
 
 set base https://raw.githubusercontent.com/wadew00/pxeboot-lab/main/public
-chain --replace ${base}/targets/arch.ipxe
+chain --replace ${base}/targets/fedora.ipxe
