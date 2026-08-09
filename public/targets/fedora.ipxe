@@ -1,12 +1,12 @@
 #!ipxe
 
 set base https://raw.githubusercontent.com/wadew00/pxeboot-lab/main/public
-set fedora_tree https://download.fedoraproject.org/pub/fedora/linux/releases/44/Server/x86_64/os
+set fedora_tree https://download.fedoraproject.org/pub/fedora/linux/releases/44/Everything/x86_64/os
 set rdp_username installer
 set rdp_password pxe-${net0/mac:hexhyp}
 
 isset ${net0/ip} || dhcp net0 || goto failed
-echo Fedora Anaconda remote installer
+echo Fedora Workstation remote installer
 echo RDP address: ${net0/ip}:3389
 echo RDP username: ${rdp_username}
 echo RDP password: ${rdp_password}
